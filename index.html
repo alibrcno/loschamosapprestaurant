@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1E2B2F">
+  <title>Los Chamos POS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="is-login">
+  <header id="top" class="top"></header>
+  <main id="main" class="main"></main>
+  <nav id="nav" class="nav" aria-label="Secciones"></nav>
+  <div id="modal-root"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <iframe id="print-frame" title="Impresión de tickets" aria-hidden="true" tabindex="-1"></iframe>
+
+  <!-- El orden importa: store define los datos, app el núcleo, luego los módulos -->
+  <script src="store.js"></script>
+  <script src="app.js"></script>
+  <script src="turno.js"></script>
+  <script src="pos.js"></script>
+  <script src="reportes.js"></script>
+  <script>LC.boot();</script>
+</body>
+</html>
