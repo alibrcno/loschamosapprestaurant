@@ -1,7 +1,12 @@
 // Conexión a Neon. La cadena de conexión viene SOLO de la variable de entorno DATABASE_URL
 // (rol app_user, sin permisos de dueño). Nunca se escribe en el código.
-import { Pool, PoolClient } from 'pg';
+import { Pool, PoolClient, types } from 'pg';
 import { ErrorApi } from './http';
+
+// Postgres entrega bigint (pesos) y numeric (costos, stock) como texto; aquí se vuelven números.
+// Los pesos caben de sobra en un número de JavaScript (hasta 9 mil billones).
+types.setTypeParser(20, (v) => Number(v));      // bigint
+types.setTypeParser(1700, (v) => parseFloat(v)); // numeric
 
 let pool: Pool | null = null;
 

@@ -14,7 +14,9 @@ Navegador (public/)  ──HTTPS──>  API serverless en Vercel (/api, Node + 
 
 - `public/`: la app. HTML, CSS y JavaScript puro, sin compilar. Se conecta a la API por partes (fase 3):
   - **Parte 1 hecha:** ingreso (código de negocio + usuario + clave) y usuarios (Ajustes → Usuarios) van al servidor con `LC.api()`. La sesión la da `/api/auth/yo` al cargar; `LC.equipo` (de `/api/equipo`) es el personal para la apertura. `LC.db.usuarios` ya no se usa.
-  - Pendiente: catálogo e inventario (parte 2), turno y caja (3), pedidos, comandas y cobros (4), importar respaldo (5). Mientras tanto eso sigue en `localStorage`.
+  - **Parte 2 hecha:** menú, pizzas, bebidas/utensilios/insumos y datos del negocio viven en el servidor. `LC.cargarCatalogo()` (al ingresar y al entrar a Pedidos o Ajustes) los copia en `LC.db` con la misma forma de antes; Ajustes guarda con `/api/catalogo/*`. La primera vez, Ajustes ofrece **subir el menú del equipo** (`LC.subirCatalogo()` → `/api/catalogo/importar`, solo si el servidor está vacío) y re-mapea los ids locales a los del servidor.
+  - **Provisional hasta la parte 3:** el **stock** lo lleva cada equipo (al recargar el catálogo se conserva el stock local por id), igual que el costo actualizado por llegadas y el "Ajustar stock". El turno, la caja, pedidos y cobros siguen en `localStorage` de cada equipo.
+  - Pendiente: turno y caja (parte 3), pedidos, comandas y cobros (4), importar respaldo (5).
 - `public/store.js` es la **única puerta a los datos**; `LC.api(ruta, {method, body})` es la única forma de llamar al servidor (si responde 401, vuelve al ingreso). Al conectar la API se reemplazan sus funciones (`load`, `save`, `mov`…) por llamadas HTTP; las pantallas (`app.js`, `turno.js`, `pos.js`, `reportes.js`) no deberían tener que reescribirse.
 - `db/migrations/`: esquema de Neon en archivos numerados (`001_…`, `002_…`). Nunca se edita una migración ya aplicada en Neon: los cambios van en un archivo nuevo, que también da sus permisos a `app_user`.
 - `db/pruebas/probar.sh`: aplica las migraciones en un Postgres **local** y prueba el aislamiento entre negocios y que el dinero no se pueda editar. Correrlo después de cualquier cambio en `db/`.
@@ -23,8 +25,8 @@ Navegador (public/)  ──HTTPS──>  API serverless en Vercel (/api, Node + 
   - `auth.ts`: contraseñas (bcryptjs), sesiones, `conUsuario(req, permiso, fn)` y `auditar()`. **Toda ruta protegida entra por `conUsuario`**, y revisa el permiso antes de validar datos o cifrar claves.
   - `http.ts`: `ruta()`, `leerJson()` (exige JSON, protege de CSRF), `texto()`, `pesos()` (solo enteros).
 - `public/instalar.html`: pantalla de un solo uso para crear el primer administrador (usa `/api/auth/instalar`).
-- Rutas hechas: `/api/equipo` (nombres del personal, permiso `turno.operar`), `/api/salud`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/yo`, `/api/auth/instalar` (primer admin, exige `CLAVE_INSTALACION`), `/api/usuarios`.
-- Pruebas: `PGHOST=… PGPORT=… npm run probar` corre las pruebas de la base y de la API (`pruebas/api.test.ts`) en un Postgres local. `npm run revisar` revisa TypeScript.
+- Rutas hechas: `/api/catalogo` (GET, cualquier usuario), `/api/catalogo/{productos,pizzas,inventario,negocio,importar}` (permiso `catalogo.editar`), `/api/equipo` (nombres del personal, permiso `turno.operar`), `/api/salud`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/yo`, `/api/auth/instalar` (primer admin, exige `CLAVE_INSTALACION`), `/api/usuarios`.
+- Pruebas: `PGHOST=… PGPORT=… npm run probar` corre las pruebas de la base y de la API (`pruebas/*.test.ts`, una a la vez) en un Postgres local. Cada archivo de pruebas usa su propio negocio (`loschamos`, `chamos-c`). `npm run revisar` revisa TypeScript.
 - Dependencias aprobadas: `pg` (conexión a Neon, la misma en pruebas locales), `bcryptjs`, `typescript`, `@types/*`. Nada más sin preguntar.
 - Variables de entorno en Vercel: `DATABASE_URL` (cadena de `app_user`, con `-pooler` y `sslmode=require`) y `CLAVE_INSTALACION` (frase del dueño, mínimo 12 caracteres).
 - `LEEME.md`: manual de uso del negocio (flujo del día, cómo evita fugas).

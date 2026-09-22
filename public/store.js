@@ -9,7 +9,7 @@
 'use strict';
 (function () {
   const LC = (window.LC = window.LC || {});
-  LC.VERSION = '2.1.0';
+  LC.VERSION = '2.2.0';
   LC.TENANT = 'loschamos'; // en fase 2 viene del login (multi-negocio)
   LC.KEY = 'lc2_' + LC.TENANT;
 
@@ -92,6 +92,68 @@
     return datos;
   };
   LC.equipo = []; // personal activo del negocio, viene del servidor (para la apertura de caja)
+
+  /* ---------------- catálogo (viene del servidor) ---------------- */
+  // Menú, pizzas, inventario y datos del negocio viven en el servidor y todos los equipos ven lo
+  // mismo. El STOCK todavía lo lleva cada equipo (cambia con aperturas, llegadas y cierres, que
+  // pasan al servidor en la parte 3): al recargar el catálogo se conserva el stock de este equipo.
+  LC.catalogoVacio = false;
+  LC.cargarCatalogo = async () => {
+    const c = await LC.api('catalogo');
+    LC.catalogoVacio = c.vacio;
+    if (c.vacio) return false; // aún no se ha subido: se sigue usando el menú de este equipo
+    const db = LC.db, n = c.negocio, cfg = n.config || {};
+    Object.assign(db.config, { negocio: n.nombre, whatsapp: n.whatsapp || '', nit: n.nit || '', direccion: n.direccion || '', telefono: n.telefono || '' });
+    ['mesas', 'ticket', 'valorDomicilio', 'imprimirComandas'].forEach((k) => { if (cfg[k] !== undefined) db.config[k] = cfg[k]; });
+    db.categorias = ['Pizzas'].concat(c.categorias, ['Bebidas']);
+    db.productos = c.productos.map((p) => ({ id: p.id, categoria: p.categoria || 'Otros', nombre: p.nombre, precio: p.precio, activo: p.activo }));
+    db.pizza.tipos = c.pizzas.map((t) => ({ id: t.id, nombre: t.nombre, gratis: t.gratis, precios: t.precios, extra: t.extra, sabores: t.sabores }));
+    Object.keys(LC.INV).forEach((g) => {
+      const local = Object.fromEntries(db[g].map((x) => [x.id, x]));
+      db[g] = c.inventario[g].map((x) => Object.assign({}, x, { stock: local[x.id] ? LC.num(local[x.id].stock) : LC.num(x.stock) }));
+    });
+    LC.save();
+    return true;
+  };
+
+  // La primera vez: sube el menú e inventario de este equipo al servidor. Los ids cambian
+  // (el servidor pone los suyos), así que se actualizan las referencias guardadas en este equipo.
+  LC.subirCatalogo = async () => {
+    const db = LC.db, c = db.config;
+    const r = await LC.api('catalogo/importar', { method: 'POST', body: {
+      categorias: db.categorias, productos: db.productos, pizzas: db.pizza.tipos,
+      bebidas: db.bebidas, utensilios: db.utensilios, insumos: db.insumos
+    } });
+    cambiarIds(r.ids);
+    try {
+      await LC.api('catalogo/negocio', { method: 'PATCH', body: {
+        nombre: c.negocio, whatsapp: c.whatsapp, nit: c.nit, direccion: c.direccion, telefono: c.telefono,
+        mesas: LC.num(c.mesas) || 8, ticket: LC.num(c.ticket) === 80 ? 80 : 58, valorDomicilio: Math.round(LC.num(c.valorDomicilio)), imprimirComandas: !!c.imprimirComandas
+      } });
+    } catch (e) { console.warn('No se subieron los datos del negocio', e); }
+    await LC.cargarCatalogo();
+    return r.total;
+  };
+
+  function cambiarIds(mapa) {
+    const nuevo = (id) => mapa[id] || id;
+    const reKey = (o) => (o ? Object.fromEntries(Object.entries(o).map(([k, v]) => [nuevo(k), v])) : o);
+    const db = LC.db;
+    Object.keys(LC.INV).forEach((g) => db[g].forEach((x) => (x.id = nuevo(x.id))));
+    db.productos.forEach((x) => (x.id = nuevo(x.id)));
+    db.pizza.tipos.forEach((x) => (x.id = nuevo(x.id)));
+    db.turnos.forEach((t) => {
+      const a = t.apertura || {};
+      ['bebidas', 'utensilios', 'insumos'].forEach((g) => (a[g] = reKey(a[g])));
+      if (a.difInv) ['bebidas', 'utensilios'].forEach((g) => (a.difInv[g] = reKey(a.difInv[g])));
+      if (t.cierre) ['bebidas', 'utensilios'].forEach((g) => (t.cierre[g] = reKey(t.cierre[g])));
+      if (t.cocina && t.cocina.cierre) t.cocina.cierre.conteo = reKey(t.cocina.cierre.conteo);
+    });
+    db.entradas.forEach((e) => (e.itemId = nuevo(e.itemId)));
+    db.ordenes.forEach((o) => o.lineas.forEach((l) => { if (l.bebidaId) l.bebidaId = nuevo(l.bebidaId); if (l.pid) l.pid = nuevo(l.pid); }));
+    if (LC.wizReset) LC.wizReset();
+    LC.save();
+  }
 
   /* ---------------- datos iniciales ---------------- */
   function seed(migrar) {

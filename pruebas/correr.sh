@@ -7,4 +7,4 @@ bash db/pruebas/probar.sh
 echo "== API =="
 rm -rf .build && npx tsc -p tsconfig.json
 DATABASE_URL="postgresql://app_user@localhost:${PGPORT:-5432}/loschamos_prueba?host=${PGHOST:-/var/run/postgresql}" \
-  node --test --test-reporter=spec .build/pruebas/*.test.js
+  node --test --test-concurrency=1 --test-reporter=spec .build/pruebas/*.test.js

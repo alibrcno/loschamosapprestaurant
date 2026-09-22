@@ -29,7 +29,16 @@
   LC.A.modalFondo = (d, el, ev) => { if (ev.target === el) LC.cerrarModal(); };
   LC.A.cerrarModal = () => LC.cerrarModal();
 
-  LC.go = (view, params = {}) => { LC.state = { view, params }; LC.cerrarModal(); LC.render(); window.scrollTo(0, 0); };
+  LC.go = (view, params = {}) => {
+    LC.state = { view, params }; LC.cerrarModal(); LC.render(); window.scrollTo(0, 0);
+    // Trae los cambios de menú y precios hechos desde otros equipos
+    if (LC.user && (view === 'pos' || view === 'ajustes')) {
+      LC.cargarCatalogo().then((ok) => {
+        const el = document.activeElement, escribiendo = el && el.closest('#main') && el.matches('input, select, textarea');
+        if (ok && LC.state.view === view && !$('#modal-root').innerHTML && !escribiendo) LC.render();
+      }).catch(() => {});
+    }
+  };
   LC.A.go = (d) => LC.go(d.v, Object.assign({}, d));
 
   LC.guard = (...perms) => perms.some(LC.can);
@@ -151,6 +160,7 @@
     LC.user = Object.assign({ activo: true }, r.usuario);
     LC.negocio = r.negocio;
     await LC.cargarEquipo();
+    try { await LC.cargarCatalogo(); } catch (e) { console.warn('No se pudo cargar el menú del servidor', e); }
   }
   LC.cargarEquipo = async () => {
     if (!LC.can('turno.operar')) return;
@@ -222,7 +232,39 @@
     if (LC.user.rol === 'admin') tabs.push(['datos', 'Datos']);
     const tab = tabs.some((x) => x[0] === p.tab) ? p.tab : tabs[0][0];
     const body = { menu: tabMenu, pizzas: tabPizzas, negocio: tabNegocio, usuarios: tabUsuarios, datos: tabDatos }[tab];
-    return `<div class="page-head"><h1>Ajustes</h1></div>${LC.tabs(tabs, tab, 'ajustes')}${body ? body() : tabInventario(tab)}`;
+    const aviso = LC.catalogoVacio && LC.can('catalogo.editar') && tab !== 'usuarios' ? `<div class="notice">
+      <strong>El menú todavía no está en el servidor.</strong> Súbelo una vez desde este equipo: productos, pizzas, bebidas, utensilios, insumos y datos del negocio. Después todos los equipos verán lo mismo.
+      <button class="btn primary block" data-a="subirCatalogo">Subir el menú de este equipo al servidor</button></div>` : '';
+    return `<div class="page-head"><h1>Ajustes</h1></div>${LC.tabs(tabs, tab, 'ajustes')}${aviso}${body ? body() : tabInventario(tab)}`;
+  };
+
+  /* Guarda un cambio del catálogo en el servidor y recarga lo que ven todos los equipos */
+  async function enServidor(el, fn, msg) {
+    if (LC.catalogoVacio) return LC.toast('Primero sube el menú de este equipo al servidor (botón de arriba)', 'error');
+    const btn = el && (el.tagName === 'FORM' ? el.querySelector('button:not([type=button])') : el);
+    if (btn) btn.disabled = true;
+    try {
+      await fn();
+      await LC.cargarCatalogo();
+    } catch (e) {
+      if (btn) btn.disabled = false;
+      return LC.toast(e.message, 'error');
+    }
+    if (msg) LC.toast(msg);
+    LC.render();
+  }
+  LC.A.subirCatalogo = async (d, el) => {
+    if (!confirm('¿Subir el menú, las pizzas, el inventario y los datos del negocio de este equipo al servidor?')) return;
+    el.disabled = true;
+    try {
+      const n = await LC.subirCatalogo();
+      LC.log('Menú subido al servidor', `${n} productos, pizzas e ítems`);
+      LC.toast(`Listo: ${n} productos, pizzas e ítems quedaron en el servidor`);
+    } catch (e) {
+      el.disabled = false;
+      return LC.toast(e.message, 'error');
+    }
+    LC.render();
   };
 
   function tabMenu() {
@@ -254,23 +296,26 @@
         </form>`).join('')}</div>`;
     }).join('')}`;
   }
-  LC.A.prodNuevo = (d) => {
-    LC.db.productos.push({ id: LC.uid(), nombre: d.nombre.trim(), categoria: d.categoria.trim(), precio: Math.round(LC.num(d.precio)), activo: true });
-    if (!LC.db.categorias.includes(d.categoria.trim())) LC.db.categorias.splice(LC.db.categorias.length - 1, 0, d.categoria.trim());
-    LC.log('Producto creado', d.nombre); LC.save(); LC.toast('Producto agregado'); LC.render();
-  };
-  LC.A.prodGuardar = (d) => {
+  const datosProducto = (d) => ({ nombre: d.nombre.trim(), categoria: d.categoria.trim(), precio: Math.round(LC.num(d.precio)) });
+  LC.A.prodNuevo = (d, f) => enServidor(f, async () => {
+    await LC.api('catalogo/productos', { method: 'POST', body: datosProducto(d) });
+    LC.log('Producto creado', d.nombre);
+  }, 'Producto agregado');
+  LC.A.prodGuardar = (d, f) => {
     const x = LC.db.productos.find((p) => p.id === d.id); if (!x) return;
-    const antes = x.precio;
-    Object.assign(x, { nombre: d.nombre.trim(), categoria: d.categoria.trim(), precio: Math.round(LC.num(d.precio)), activo: !!d.activo });
-    LC.log('Producto editado', `${x.nombre}${antes !== x.precio ? `: precio ${LC.fmt(antes)} a ${LC.fmt(x.precio)}` : ''}`);
-    LC.save(); LC.toast('Guardado'); LC.render();
+    const antes = x.precio, datos = datosProducto(d);
+    return enServidor(f, async () => {
+      await LC.api('catalogo/productos', { method: 'PATCH', body: Object.assign({ id: d.id, activo: !!d.activo }, datos) });
+      LC.log('Producto editado', `${datos.nombre}${antes !== datos.precio ? `: precio ${LC.fmt(antes)} a ${LC.fmt(datos.precio)}` : ''}`);
+    }, 'Guardado');
   };
-  LC.A.prodBorrar = (d) => {
+  LC.A.prodBorrar = (d, el) => {
     const x = LC.db.productos.find((p) => p.id === d.id);
     if (!x || !confirm(`¿Eliminar "${x.nombre}" del menú?`)) return;
-    LC.db.productos = LC.db.productos.filter((p) => p.id !== d.id);
-    LC.log('Producto eliminado', x.nombre); LC.save(); LC.render();
+    return enServidor(el, async () => {
+      await LC.api('catalogo/productos', { method: 'DELETE', body: { id: d.id } });
+      LC.log('Producto eliminado', x.nombre);
+    }, 'Producto eliminado');
   };
 
   function tabPizzas() {
@@ -286,14 +331,14 @@
       <button class="btn primary">Guardar ${esc(tp.nombre)}</button>
     </form>`).join('');
   }
-  LC.A.pizzaGuardar = (d) => {
-    const tp = LC.db.pizza.tipos.find((x) => x.id === d.id); if (!tp) return;
-    tp.nombre = d.nombre.trim();
-    LC.TAMANOS.forEach((s) => { tp.precios[s] = Math.round(LC.num(d['P_' + s])); tp.extra[s] = Math.round(LC.num(d['X_' + s])); });
-    tp.gratis = Math.max(0, parseInt(d.gratis, 10) || 0);
-    tp.sabores = d.sabores.split(',').map((s) => s.trim()).filter(Boolean);
-    LC.log('Pizza editada', tp.nombre); LC.save(); LC.toast('Guardado'); LC.render();
-  };
+  LC.A.pizzaGuardar = (d, f) => enServidor(f, async () => {
+    const porTamano = (pre) => Object.fromEntries(LC.TAMANOS.map((s) => [s, Math.round(LC.num(d[pre + s]))]));
+    await LC.api('catalogo/pizzas', { method: 'PATCH', body: {
+      id: d.id, nombre: d.nombre.trim(), precios: porTamano('P_'), extra: porTamano('X_'),
+      gratis: Math.max(0, parseInt(d.gratis, 10) || 0), sabores: d.sabores.split(',').map((s) => s.trim()).filter(Boolean)
+    } });
+    LC.log('Pizza editada', d.nombre.trim());
+  }, 'Guardado');
 
   function tabInventario(tipo) {
     const esB = tipo === 'bebidas';
@@ -326,23 +371,26 @@
         <button type="button" class="btn sm ghost danger" data-a="invBorrar" data-tipo="${tipo}" data-id="${it.id}">Eliminar</button>
       </form>`).join('')}</div>`;
   }
-  LC.A.invNuevo = (d) => {
-    const it = { id: LC.uid(), nombre: d.nombre.trim(), unidad: d.unidad.trim(), costo: LC.num(d.costo), sugerido: LC.num(d.sugerido), stock: 0 };
+  const datosItem = (d) => {
+    const it = { nombre: d.nombre.trim(), unidad: d.unidad.trim(), costo: LC.num(d.costo), sugerido: LC.num(d.sugerido) };
     if (d.tipo === 'bebidas') it.precio = Math.round(LC.num(d.precio));
-    LC.db[d.tipo].push(it);
-    LC.log('Ítem de inventario creado', `${LC.INV[d.tipo]}: ${it.nombre}`); LC.save(); LC.toast('Agregado. Su stock inicia en 0: regístralo con una llegada o en el conteo.'); LC.render();
+    return it;
   };
-  LC.A.invGuardar = (d) => {
-    const it = LC.db[d.tipo].find((x) => x.id === d.id); if (!it) return;
-    Object.assign(it, { nombre: d.nombre.trim(), unidad: d.unidad.trim(), costo: LC.num(d.costo), sugerido: LC.num(d.sugerido) });
-    if (d.tipo === 'bebidas') it.precio = Math.round(LC.num(d.precio));
-    LC.log('Ítem de inventario editado', it.nombre); LC.save(); LC.toast('Guardado'); LC.render();
-  };
-  LC.A.invBorrar = (d) => {
+  LC.A.invNuevo = (d, f) => enServidor(f, async () => {
+    await LC.api('catalogo/inventario', { method: 'POST', body: Object.assign({ tipo: d.tipo }, datosItem(d)) });
+    LC.log('Ítem de inventario creado', `${LC.INV[d.tipo]}: ${d.nombre.trim()}`);
+  }, 'Agregado. Su stock inicia en 0: regístralo con una llegada o en el conteo.');
+  LC.A.invGuardar = (d, f) => enServidor(f, async () => {
+    await LC.api('catalogo/inventario', { method: 'PATCH', body: Object.assign({ id: d.id }, datosItem(d)) });
+    LC.log('Ítem de inventario editado', d.nombre.trim());
+  }, 'Guardado');
+  LC.A.invBorrar = (d, el) => {
     const it = LC.db[d.tipo].find((x) => x.id === d.id);
     if (!it || !confirm(`¿Eliminar "${it.nombre}"? El historial se conserva.`)) return;
-    LC.db[d.tipo] = LC.db[d.tipo].filter((x) => x.id !== d.id);
-    LC.log('Ítem de inventario eliminado', it.nombre); LC.save(); LC.render();
+    return enServidor(el, async () => {
+      await LC.api('catalogo/inventario', { method: 'DELETE', body: { id: d.id } });
+      LC.log('Ítem de inventario eliminado', it.nombre);
+    }, 'Eliminado');
   };
   LC.A.invAjuste = (d) => {
     const it = LC.db[d.tipo].find((x) => x.id === d.id); if (!it) return;
@@ -381,14 +429,14 @@
       <button class="btn primary">Guardar</button>
     </form>`;
   }
-  LC.A.negocioGuardar = (d) => {
-    Object.assign(LC.db.config, {
-      negocio: d.negocio.trim(), whatsapp: d.whatsapp.replace(/\D/g, ''), mesas: Math.max(1, parseInt(d.mesas, 10) || 8),
+  LC.A.negocioGuardar = (d, f) => enServidor(f, async () => {
+    await LC.api('catalogo/negocio', { method: 'PATCH', body: {
+      nombre: d.negocio.trim(), whatsapp: d.whatsapp.replace(/\D/g, ''), mesas: parseInt(d.mesas, 10) || 0,
       ticket: +d.ticket, valorDomicilio: Math.round(LC.num(d.valorDomicilio)), nit: d.nit.trim(), direccion: d.direccion.trim(),
       telefono: d.telefono.trim(), imprimirComandas: !!d.imprimirComandas
-    });
-    LC.log('Configuración editada'); LC.save(); LC.toast('Guardado'); LC.render();
-  };
+    } });
+    LC.log('Configuración editada');
+  }, 'Guardado');
 
   /* ---------------- usuarios y permisos (guardados en el servidor) ---------------- */
   let usuariosSrv = null, cargandoUsuarios = false;
