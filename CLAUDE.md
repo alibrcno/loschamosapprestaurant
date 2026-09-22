@@ -16,6 +16,14 @@ Navegador (public/)  ──HTTPS──>  API serverless en Vercel (/api, Node + 
 - `public/store.js` es la **única puerta a los datos**. Al conectar la API se reemplazan sus funciones (`load`, `save`, `mov`…) por llamadas HTTP; las pantallas (`app.js`, `turno.js`, `pos.js`, `reportes.js`) no deberían tener que reescribirse.
 - `db/migrations/`: esquema de Neon en archivos numerados (`001_…`, `002_…`). Nunca se edita una migración ya aplicada en Neon: los cambios van en un archivo nuevo, que también da sus permisos a `app_user`.
 - `db/pruebas/probar.sh`: aplica las migraciones en un Postgres **local** y prueba el aislamiento entre negocios y que el dinero no se pueda editar. Correrlo después de cualquier cambio en `db/`.
+- `api/`: API en Vercel (TypeScript). Cada archivo es una ruta (`api/usuarios.ts` → `/api/usuarios`) que exporta `GET`, `POST`, `PATCH`… con la firma web (`Request` → `Response`). Lo compartido va en `api/_lib/` (Vercel no publica lo que empieza con `_`):
+  - `db.ts`: conexión con `pg` y `conNegocio(tenantId, fn)`, que abre transacción y fija el negocio.
+  - `auth.ts`: contraseñas (bcryptjs), sesiones, `conUsuario(req, permiso, fn)` y `auditar()`. **Toda ruta protegida entra por `conUsuario`**, y revisa el permiso antes de validar datos o cifrar claves.
+  - `http.ts`: `ruta()`, `leerJson()` (exige JSON, protege de CSRF), `texto()`, `pesos()` (solo enteros).
+- Rutas hechas: `/api/salud`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/yo`, `/api/auth/instalar` (primer admin, exige `CLAVE_INSTALACION`), `/api/usuarios`.
+- Pruebas: `PGHOST=… PGPORT=… npm run probar` corre las pruebas de la base y de la API (`pruebas/api.test.ts`) en un Postgres local. `npm run revisar` revisa TypeScript.
+- Dependencias aprobadas: `pg` (conexión a Neon, la misma en pruebas locales), `bcryptjs`, `typescript`, `@types/*`. Nada más sin preguntar.
+- Variables de entorno en Vercel: `DATABASE_URL` (cadena de `app_user`, con `-pooler` y `sslmode=require`) y `CLAVE_INSTALACION` (frase del dueño, mínimo 12 caracteres).
 - `LEEME.md`: manual de uso del negocio (flujo del día, cómo evita fugas).
 - Lee `LEEME.md`, `db/migrations/` y los `.js` que vayas a tocar antes de cambiar algo.
 
@@ -49,7 +57,8 @@ Navegador (public/)  ──HTTPS──>  API serverless en Vercel (/api, Node + 
 
 - **Pre-cuenta:** lo que salió en la pre-cuenta impresa solo se quita anulando (permiso `pos.anular` y motivo). Lo agregado después y aún no enviado a cocina se puede corregir libremente. La API debe respetar la misma regla.
 - **Permisos:** la fuente de verdad es el servidor (fase 2). El frontend solo oculta botones.
-- **Importación del respaldo:** los usuarios no se importan con sus claves actuales. Cada persona crea una contraseña nueva, que se guarda con bcrypt o argon2 en la API.
+- **Contraseñas:** el administrador crea la contraseña de cada persona al crear su usuario (y la cambia si la olvidan; eso también la desbloquea). El personal puede usar claves sencillas (mínimo 4 caracteres); el administrador, mínimo 8. Protección: bcrypt, bloqueo de 15 minutos tras 5 intentos fallidos y mensaje de error que no dice qué dato falló.
+- **Importación del respaldo:** los usuarios no se importan con sus claves viejas; el administrador les pone clave nueva.
 - **Ingreso:** con **código de negocio** (ej. `loschamos`) + usuario + contraseña; no por subdominio. La función `tenant_por_codigo()` convierte el código en el id del negocio.
 - **Sesión:** la cookie trae el negocio y un token al azar; la API fija ese negocio y busca el hash del token *dentro de ese negocio*, así un token solo sirve en su propio negocio.
 - **Vercel:** el dueño ya tiene cuenta.

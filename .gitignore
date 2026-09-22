@@ -8,3 +8,6 @@ node_modules/
 
 # Respaldos con datos reales del negocio
 loschamos-respaldo-*.json
+
+# Compilación local de pruebas
+.build/
