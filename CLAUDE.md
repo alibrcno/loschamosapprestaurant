@@ -43,3 +43,10 @@ Navegador (public/)  ──HTTPS──>  API serverless en Vercel (/api, Node + 
 - Cambios pequeños y que se puedan revisar. Explicar qué se hizo y por qué, en palabras simples.
 - Probar en navegador real (Playwright) el flujo principal después de cambios en `public/`: apertura de caja → pedido de mesa con pizza y bebidas → comanda → cobro dividido (Nequi + efectivo) → cierre. Usar `timezoneId: 'America/Bogota'` y también una zona distinta para detectar errores de hora.
 - Nunca subir datos reales del negocio (respaldos `.json`, clientes, ventas) al repositorio.
+
+## Decisiones ya tomadas por el dueño
+
+- **Pre-cuenta:** lo que salió en la pre-cuenta impresa solo se quita anulando (permiso `pos.anular` y motivo). Lo agregado después y aún no enviado a cocina se puede corregir libremente. La API debe respetar la misma regla.
+- **Permisos:** la fuente de verdad es el servidor (fase 2). El frontend solo oculta botones.
+- **Importación del respaldo:** los usuarios no se importan con sus claves actuales. Cada persona crea una contraseña nueva, que se guarda con bcrypt o argon2 en la API.
+- **Neon:** el dueño está creando la cuenta desde cero. Proyecto `loschamos-pos` en AWS US East 1 (N. Virginia), cerca de la región por defecto de Vercel. La cadena de conexión nunca se pega en el chat ni en el código.

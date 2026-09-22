@@ -14,7 +14,10 @@
   const abiertas = () => { const t = LC.turno(); return t ? LC.db.ordenes.filter((o) => o.turnoId === t.id && o.estado === 'abierta') : []; };
   const pendientes = (o) => o.lineas.filter((l) => !l.anulada && !l.comanda && !l.sinCocina);
   const buscar = (id) => LC.db.ordenes.find((o) => o.id === id);
-  const editable = (o, l) => !l.anulada && !l.comanda && !o.precuentaEn;
+  // Lo que ya salió en la pre-cuenta impresa solo se quita anulando (con permiso y motivo).
+  // Lo agregado después de la pre-cuenta y aún no enviado a cocina se puede corregir libremente.
+  const trasPrecuenta = (o, l) => !!o.precuentaEn && l.en > o.precuentaEn;
+  const editable = (o, l) => !l.anulada && !l.comanda && (!o.precuentaEn || trasPrecuenta(o, l));
 
   function limpiarVacias() {
     const antes = LC.db.ordenes.length;
@@ -157,6 +160,7 @@
       if (l.anulada) badge = `<span class="tag bad">Anulado</span>`;
       else if (l.comanda) { const c = comandaDe(l.comanda); badge = `<span class="tag">Comanda #${l.comanda}${c ? ' ' + LC.hora(c.en) : ''}</span>`; }
       else if (!l.sinCocina) badge = '<span class="tag maiz">Por enviar</span>';
+      if (!l.anulada && trasPrecuenta(o, l)) badge += '<span class="tag maiz">Después de la pre-cuenta</span>';
       let acc = '';
       if (editable(o, l) && LC.can('pos.tomar')) {
         acc = `<div class="qty"><button class="icon-btn sm" data-a="lineaMenos" data-l="${l.lid}" aria-label="Quitar uno">−</button><span>${l.qty}</span><button class="icon-btn sm" data-a="lineaMas" data-l="${l.lid}" aria-label="Agregar uno">+</button></div>
@@ -175,7 +179,7 @@
 
   function agregar(o, l, render = true) {
     if (!o.numero) { const t = LC.turno(); t.seqOrden = (t.seqOrden || 0) + 1; o.numero = t.seqOrden; }
-    const igual = !o.precuentaEn && o.lineas.find((x) => !x.comanda && !x.anulada && !x.obs && !l.obs && x.nombre === l.nombre && x.detalle === (l.detalle || '') && x.precio === l.precio);
+    const igual = o.lineas.find((x) => editable(o, x) && !x.obs && !l.obs && x.nombre === l.nombre && x.detalle === (l.detalle || '') && x.precio === l.precio);
     if (igual) igual.qty += l.qty || 1;
     else o.lineas.push(Object.assign({ lid: LC.uid(), qty: 1, detalle: '', obs: '', comanda: null, anulada: null, sinCocina: false, por: LC.user.nombre, en: new Date().toISOString() }, l));
     if (render) { LC.save(); LC.render(); }
@@ -192,9 +196,10 @@
     const o = actual(), b = LC.db.bebidas.find((x) => x.id === d.id);
     if (o && b) agregar(o, { bebidaId: b.id, nombre: b.nombre, categoria: 'Bebidas', precio: LC.num(b.precio), sinCocina: true });
   };
-  LC.A.lineaMas = (d) => { const l = linea(d.l); if (l) { l.qty++; LC.save(); LC.render(); } };
+  const lineaEditable = (lid) => { const o = actual(), l = linea(lid); return o && l && editable(o, l) && LC.can('pos.tomar') ? l : null; };
+  LC.A.lineaMas = (d) => { const l = lineaEditable(d.l); if (l) { l.qty++; LC.save(); LC.render(); } };
   LC.A.lineaMenos = (d) => {
-    const o = actual(), l = linea(d.l); if (!l) return;
+    const o = actual(), l = lineaEditable(d.l); if (!l) return;
     if (l.qty > 1) l.qty--; else o.lineas = o.lineas.filter((x) => x !== l);
     LC.save(); LC.render();
   };
@@ -205,7 +210,7 @@
         <label>Observación para cocina<input name="obs" value="${esc(l.obs)}" placeholder="Ej. sin cebolla, término medio"></label>
         <button class="btn primary block">Guardar nota</button></form>`);
   };
-  LC.A.lineaNotaGuardar = (d) => { const l = linea(d.l); if (l) { l.obs = d.obs.trim(); LC.save(); LC.cerrarModal(); LC.render(); } };
+  LC.A.lineaNotaGuardar = (d) => { const l = lineaEditable(d.l); if (l) { l.obs = d.obs.trim(); LC.save(); LC.cerrarModal(); LC.render(); } };
   LC.A.lineaAnular = (d) => {
     const l = linea(d.l); if (!l) return;
     LC.modal(`${LC.modalHead('Anular ' + l.nombre)}

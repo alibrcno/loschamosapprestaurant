@@ -16,6 +16,8 @@
   const difClase = (n) => (n < 0 ? 'neg' : n > 0 ? 'pos' : '');
   const signo = (n) => (n > 0 ? '+' : '') + LC.q(n);
   const signoPesos = (n) => (n > 0 ? '+' : '') + LC.fmt(n);
+  // Al cerrar sesión se descarta el asistente: la siguiente persona no ve los conteos de la anterior
+  LC.wizReset = () => { W = null; };
   LC.A.wizAtras = () => { if (W && W.paso > 0) { W.paso--; LC.render(); } };
   LC.A.wizCancelar = (d) => { W = null; LC.go(d.v || 'inicio'); };
 

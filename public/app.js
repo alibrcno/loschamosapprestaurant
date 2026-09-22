@@ -193,6 +193,7 @@
     LC.save();
     sessionStorage.removeItem(SES);
     LC.user = null;
+    if (LC.wizReset) LC.wizReset();
     LC.cerrarModal();
     LC.render();
   };
