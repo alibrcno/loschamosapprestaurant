@@ -46,7 +46,6 @@
   };
 
   /* ---------------- utilidades ---------------- */
-  const pad = (n) => String(n).padStart(2, '0');
   LC.uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   LC.num = (v) => {
     const n = parseFloat(String(v == null ? '' : v).replace(',', '.'));
@@ -56,11 +55,17 @@
   LC.q = (n) => (Math.round((+n || 0) * 100) / 100).toLocaleString('es-CO');
   LC.esc = (s) =>
     String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  LC.hora = (iso) => new Date(iso).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit' });
-  LC.fecha = (iso) => new Date(iso).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' });
-  LC.fechaLarga = (iso) => new Date(iso).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  // Fecha local (Colombia) sin el desfase de UTC que tenía la versión anterior
-  LC.diaLocal = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  // Siempre en hora de Colombia, aunque el equipo tenga otra zona horaria configurada
+  LC.TZ = 'America/Bogota';
+  LC.hora = (iso) => new Date(iso).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', timeZone: LC.TZ });
+  LC.fecha = (iso) => new Date(iso).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short', timeZone: LC.TZ });
+  LC.fechaLarga = (iso) => new Date(iso).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: LC.TZ });
+  LC.fechaHora = (iso) => new Date(iso).toLocaleString('es-CO', { timeZone: LC.TZ });
+  // Fecha en Colombia (AAAA-MM-DD) sin el desfase de UTC que tenía la versión anterior
+  const fmtDia = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: LC.TZ });
+  LC.diaLocal = (d = new Date()) => fmtDia.format(d);
+  // 0 = domingo ... 6 = sábado, según el día en Colombia
+  LC.diaSemana = (iso) => new Date(LC.diaLocal(new Date(iso)) + 'T12:00:00Z').getUTCDay();
 
   LC.hash = async (texto, salt) => {
     const data = new TextEncoder().encode(salt + '::' + texto);

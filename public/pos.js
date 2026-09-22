@@ -400,7 +400,7 @@
   function ticketCuenta(o, titulo) {
     const ls = o.lineas.filter((l) => !l.anulada);
     return `${cab()}<div class="hr"></div><div class="c b">${titulo}</div><div class="c">${esc(LC.tituloOrden(o))}, orden #${pad3(o.numero)}</div>
-      <div class="c s">${new Date().toLocaleString('es-CO')}</div><div class="hr"></div>
+      <div class="c s">${LC.fechaHora(new Date())}</div><div class="hr"></div>
       ${ls.map((l) => `<div class="r"><span>${l.qty} ${esc(l.nombre)}</span><span>${LC.fmt(l.precio * l.qty)}</span></div>${l.detalle ? `<div class="ind s">${esc(l.detalle)}</div>` : ''}`).join('')}
       <div class="hr"></div><div class="r b big"><span>TOTAL</span><span>${LC.fmt(LC.totalOrden(o))}</span></div>
       ${o.pagos.length ? `<div class="hr"></div>${o.pagos.map((x) => `<div class="r"><span>${x.cuenta}</span><span>${LC.fmt(x.monto)}</span></div>`).join('')}

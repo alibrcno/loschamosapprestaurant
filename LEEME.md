@@ -6,20 +6,20 @@ Punto de venta, control de turno, inventario y finanzas para restaurante de comi
 
 | Archivo | Qué hace |
 |---|---|
-| `index.html` | Estructura de la app. Es el que se abre. |
-| `store.js` | Datos: cuentas, catálogo, inventario, libro contable, cálculos del turno. Única puerta a los datos (en la fase 2 se cambia por la API sin tocar lo demás). |
-| `app.js` | Núcleo: ingreso, permisos, navegación, impresión, WhatsApp, Ajustes y usuarios. |
-| `turno.js` | Apertura de caja, gastos, llegada de mercancía, inventario de cocina y cierre. |
-| `pos.js` | Mesas, domicilios, pedidos, pizzas, comandas, pre-cuenta, cobro y pantalla de cocina. |
-| `reportes.js` | Saldos por cuenta, historial de turnos, resumen del mes, movimientos y auditoría. |
-| `styles.css` | Diseño. |
+| `public/index.html` | Estructura de la app. Es el que se abre. |
+| `public/store.js` | Datos: cuentas, catálogo, inventario, libro contable, cálculos del turno. Única puerta a los datos (en la fase 2 se cambia por la API sin tocar lo demás). |
+| `public/app.js` | Núcleo: ingreso, permisos, navegación, impresión, WhatsApp, Ajustes y usuarios. |
+| `public/turno.js` | Apertura de caja, gastos, llegada de mercancía, inventario de cocina y cierre. |
+| `public/pos.js` | Mesas, domicilios, pedidos, pizzas, comandas, pre-cuenta, cobro y pantalla de cocina. |
+| `public/reportes.js` | Saldos por cuenta, historial de turnos, resumen del mes, movimientos y auditoría. |
+| `public/styles.css` | Diseño. |
 | `schema.sql` | Base de datos para Neon (fase 2). No lo usa la app todavía. |
 
-Los 7 archivos de la app deben estar juntos en la misma carpeta.
+Los 7 archivos de la app viven juntos en la carpeta `public/` (es la carpeta que Vercel publica). Las reglas del proyecto para trabajar con Claude están en `CLAUDE.md`.
 
 ## Primer uso
 
-1. Abre `index.html`. Como no hay usuarios, te pide crear el **administrador** (tú).
+1. Abre `public/index.html`. Como no hay usuarios, te pide crear el **administrador** (tú).
 2. En **Ajustes** revisa: Menú y precios, Pizzas (precios por tamaño, valor del sabor adicional, sabores), Bebidas, Utensilios e Insumos (costo unitario y **stock sugerido**), Negocio (WhatsApp, número de mesas, ancho del ticket 58/80 mm).
 3. En **Ajustes → Usuarios** crea a la encargada, meseras y cocina con usuario y contraseña. El rol pone permisos por defecto y puedes marcar o quitar permisos uno por uno.
 

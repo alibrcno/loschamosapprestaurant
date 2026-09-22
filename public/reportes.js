@@ -93,7 +93,7 @@
       const r = t.resumen;
       tot.ventas += r.ventas; tot.gastos += r.gastos; tot.gastosOp += r.gastosOp; tot.costo += r.costoConsumo; tot.utilidad += r.utilidad;
       tot.desc += Object.values((t.cierre && t.cierre.descuadre) || {}).reduce((a, b) => a + b, 0);
-      const dw = new Date(t.abiertoEn).getDay();
+      const dw = LC.diaSemana(t.abiertoEn);
       dias[dw].v += r.ventas; dias[dw].n++;
       (t.personal || []).forEach((x) => {
         const k = x.nombre.trim().toLowerCase();

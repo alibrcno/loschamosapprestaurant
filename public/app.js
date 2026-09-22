@@ -499,12 +499,18 @@
     const u = id && LC.db.usuarios.find((x) => x.id === id && x.activo);
     if (u) { LC.user = u; LC.state.view = inicioPorRol(u); }
     LC.render();
-    // Si la app está abierta en otra pestaña del mismo equipo (ej. pantalla de cocina), se sincroniza
+    // Si la app está abierta en otra pestaña del mismo equipo (ej. pantalla de cocina), se sincroniza.
+    // No se redibuja mientras alguien escribe en un formulario, para no borrarle lo que lleva.
+    const escribiendo = () => {
+      const el = document.activeElement;
+      return ['apertura', 'cierre', 'cocinaCierre', 'ajustes'].includes(LC.state.view) || !!(el && el.closest('#main') && el.matches('input, select, textarea'));
+    };
     window.addEventListener('storage', (e) => {
       if (e.key !== LC.KEY) return;
       LC.db = LC.load();
       if (LC.user) LC.user = LC.db.usuarios.find((x) => x.id === LC.user.id && x.activo) || null;
-      if (!$('#modal-root').innerHTML) LC.render();
+      if (!LC.user) return LC.render();
+      if (!$('#modal-root').innerHTML && !escribiendo()) LC.render();
     });
     setInterval(() => {
       if (LC.user && ['cocina', 'pos'].includes(LC.state.view) && !$('#modal-root').innerHTML) LC.render();
