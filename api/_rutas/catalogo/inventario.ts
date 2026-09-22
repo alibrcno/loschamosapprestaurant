@@ -3,10 +3,10 @@
 //   PATCH  { id, nombre, unidad, precio?, costo, sugerido }      → edita nombre, precio de venta, costo y stock sugerido
 //   DELETE { id }                                                → lo quita (si ya tuvo movimientos, solo se oculta)
 // El stock NO se cambia aquí: cambia con conteos, llegadas o ajustes con motivo (parte 3).
-import { auditar, conUsuario } from '../_lib/auth';
-import { TIPOS, cantidad, leerGrupo, yaUsado } from '../_lib/catalogo';
-import { esUuid } from '../_lib/db';
-import { ErrorApi, json, leerJson, pesos, ruta, texto } from '../_lib/http';
+import { auditar, conUsuario } from '../../_lib/auth';
+import { TIPOS, cantidad, leerGrupo, yaUsado } from '../../_lib/catalogo';
+import { esUuid } from '../../_lib/db';
+import { ErrorApi, json, leerJson, pesos, ruta, texto } from '../../_lib/http';
 
 const leerId = (v: unknown) => { if (!esUuid(v)) throw new ErrorApi(400, 'Falta el ítem'); return v; };
 

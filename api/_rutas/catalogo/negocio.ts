@@ -1,8 +1,8 @@
 // PATCH /api/catalogo/negocio  (permiso catalogo.editar)
 // { nombre, whatsapp, nit, direccion, telefono, mesas, ticket, valorDomicilio, imprimirComandas }
 // El código del negocio, el plan y si está activo NO se cambian aquí (la base ni lo permite).
-import { auditar, conUsuario } from '../_lib/auth';
-import { ErrorApi, json, leerJson, pesos, ruta, texto } from '../_lib/http';
+import { auditar, conUsuario } from '../../_lib/auth';
+import { ErrorApi, json, leerJson, pesos, ruta, texto } from '../../_lib/http';
 
 const opcional = (v: unknown, campo: string, max: number) => (v === undefined || v === null || v === '' ? '' : texto(v, campo, { max }));
 

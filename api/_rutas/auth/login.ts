@@ -1,9 +1,9 @@
 // POST /api/auth/login  { codigo, usuario, clave }
 // Ingresa con código de negocio + usuario + contraseña. Tras 5 intentos fallidos el
 // usuario queda bloqueado 15 minutos (o hasta que el administrador le cambie la clave).
-import { COLUMNAS_USUARIO, INTENTOS_MAX, MINUTOS_BLOQUEO, Usuario, auditar, crearSesion, verificarClave } from '../_lib/auth';
-import { conNegocio, negocioPorCodigo } from '../_lib/db';
-import { ErrorApi, json, leerJson, ruta, texto } from '../_lib/http';
+import { COLUMNAS_USUARIO, INTENTOS_MAX, MINUTOS_BLOQUEO, Usuario, auditar, crearSesion, verificarClave } from '../../_lib/auth';
+import { conNegocio, negocioPorCodigo } from '../../_lib/db';
+import { ErrorApi, json, leerJson, ruta, texto } from '../../_lib/http';
 
 const INCORRECTO = 'Código de negocio, usuario o contraseña incorrectos';
 

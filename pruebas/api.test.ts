@@ -2,15 +2,15 @@
 // Llaman a las rutas igual que lo haría Vercel: con un Request y esperando un Response.
 import assert from 'node:assert/strict';
 import { after, describe, test } from 'node:test';
-import * as equipo from '../api/equipo';
-import * as instalar from '../api/auth/instalar';
-import * as login from '../api/auth/login';
-import * as logout from '../api/auth/logout';
-import * as yo from '../api/auth/yo';
+import * as equipo from '../api/_rutas/equipo';
+import * as instalar from '../api/_rutas/auth/instalar';
+import * as login from '../api/_rutas/auth/login';
+import * as logout from '../api/_rutas/auth/logout';
+import * as yo from '../api/_rutas/auth/yo';
 import { cerrarConexiones } from '../api/_lib/db';
 import { pesos } from '../api/_lib/http';
-import * as salud from '../api/salud';
-import * as usuarios from '../api/usuarios';
+import * as salud from '../api/_rutas/salud';
+import * as usuarios from '../api/_rutas/usuarios';
 
 type Ruta = (req: Request) => Promise<Response>;
 const URL_BASE = 'https://loschamos.test/api';

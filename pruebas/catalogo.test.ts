@@ -2,16 +2,16 @@
 // Usa el negocio de prueba "chamos-c", que empieza sin usuarios ni menú.
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import * as instalar from '../api/auth/instalar';
-import * as login from '../api/auth/login';
-import * as catalogo from '../api/catalogo/index';
-import * as importar from '../api/catalogo/importar';
-import * as inventario from '../api/catalogo/inventario';
-import * as negocio from '../api/catalogo/negocio';
-import * as pizzas from '../api/catalogo/pizzas';
-import * as productos from '../api/catalogo/productos';
+import * as instalar from '../api/_rutas/auth/instalar';
+import * as login from '../api/_rutas/auth/login';
+import * as catalogo from '../api/_rutas/catalogo/index';
+import * as importar from '../api/_rutas/catalogo/importar';
+import * as inventario from '../api/_rutas/catalogo/inventario';
+import * as negocio from '../api/_rutas/catalogo/negocio';
+import * as pizzas from '../api/_rutas/catalogo/pizzas';
+import * as productos from '../api/_rutas/catalogo/productos';
 import { cerrarConexiones } from '../api/_lib/db';
-import * as usuarios from '../api/usuarios';
+import * as usuarios from '../api/_rutas/usuarios';
 
 type Ruta = (req: Request) => Promise<Response>;
 async function llamar(fn: Ruta, metodo: string, cuerpo?: unknown, cookie?: string) {

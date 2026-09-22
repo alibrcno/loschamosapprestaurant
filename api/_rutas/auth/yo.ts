@@ -1,6 +1,6 @@
 // GET /api/auth/yo  → quién está conectado y a qué negocio pertenece.
-import { conUsuario } from '../_lib/auth';
-import { json, ruta } from '../_lib/http';
+import { conUsuario } from '../../_lib/auth';
+import { json, ruta } from '../../_lib/http';
 
 export const GET = ruta(async (req) => {
   const r = await conUsuario(req, null, async (db, u) => {

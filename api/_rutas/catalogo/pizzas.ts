@@ -1,9 +1,9 @@
 // PATCH /api/catalogo/pizzas  { id, nombre, precios, extra, gratis, sabores }  (permiso catalogo.editar)
 // precios y extra: { Personal, Mediana, Familiar } en pesos. 0 = ese tamaño no se vende.
-import { auditar, conUsuario } from '../_lib/auth';
-import { preciosTamano, sabores } from '../_lib/catalogo';
-import { esUuid } from '../_lib/db';
-import { ErrorApi, json, leerJson, ruta, texto } from '../_lib/http';
+import { auditar, conUsuario } from '../../_lib/auth';
+import { preciosTamano, sabores } from '../../_lib/catalogo';
+import { esUuid } from '../../_lib/db';
+import { ErrorApi, json, leerJson, ruta, texto } from '../../_lib/http';
 
 export const PATCH = ruta(async (req) => {
   const b = await leerJson(req);

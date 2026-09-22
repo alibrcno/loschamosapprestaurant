@@ -3,9 +3,9 @@
 // Exige la "clave de instalación" (variable de entorno CLAVE_INSTALACION en Vercel), para que
 // nadie más que el dueño pueda reclamar el negocio aunque conozca su código.
 import { createHash, timingSafeEqual } from 'crypto';
-import { COLUMNAS_USUARIO, PERMISOS, Usuario, auditar, crearSesion, hashClave, validarClave } from '../_lib/auth';
-import { conNegocio, negocioPorCodigo } from '../_lib/db';
-import { ErrorApi, json, leerJson, ruta, texto } from '../_lib/http';
+import { COLUMNAS_USUARIO, PERMISOS, Usuario, auditar, crearSesion, hashClave, validarClave } from '../../_lib/auth';
+import { conNegocio, negocioPorCodigo } from '../../_lib/db';
+import { ErrorApi, json, leerJson, ruta, texto } from '../../_lib/http';
 
 const sha = (s: string) => createHash('sha256').update(s).digest();
 

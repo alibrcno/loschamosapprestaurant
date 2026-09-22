@@ -3,9 +3,9 @@
 //   POST  { nombre, usuario, clave, rol, permisos, activo? }         → crea un usuario con la clave que pone el administrador
 //   PATCH { id, nombre?, usuario?, clave?, rol?, permisos?, activo? } → edita; con clave nueva también lo desbloquea
 import type { PoolClient } from 'pg';
-import { PERMISOS, PERMISOS_ROL, Permiso, ROLES, Rol, Usuario, auditar, conUsuario, hashClave, validarClave } from './_lib/auth';
-import { esUuid } from './_lib/db';
-import { ErrorApi, json, leerJson, ruta, texto } from './_lib/http';
+import { PERMISOS, PERMISOS_ROL, Permiso, ROLES, Rol, Usuario, auditar, conUsuario, hashClave, validarClave } from '../_lib/auth';
+import { esUuid } from '../_lib/db';
+import { ErrorApi, json, leerJson, ruta, texto } from '../_lib/http';
 
 const COLUMNAS = `id, nombre, usuario, rol, permisos, activo, coalesce(bloqueado_hasta > now(), false) AS bloqueado, creado_en`;
 

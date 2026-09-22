@@ -3,9 +3,9 @@
 // Sube el menú y el inventario de un equipo al servidor. SOLO funciona si el negocio todavía no
 // tiene catálogo en el servidor: nunca reemplaza ni borra uno existente.
 // Devuelve { ids: { idLocal: idNuevo } } para que la app actualice sus referencias.
-import { auditar, conUsuario } from '../_lib/auth';
-import { Grupo, TIPOS, cantidad, catalogoVacio, idCategoria, preciosTamano, sabores } from '../_lib/catalogo';
-import { ErrorApi, json, leerJson, pesos, ruta, texto } from '../_lib/http';
+import { auditar, conUsuario } from '../../_lib/auth';
+import { Grupo, TIPOS, cantidad, catalogoVacio, idCategoria, preciosTamano, sabores } from '../../_lib/catalogo';
+import { ErrorApi, json, leerJson, pesos, ruta, texto } from '../../_lib/http';
 
 function lista(v: unknown, campo: string, max: number): Record<string, unknown>[] {
   if (v === undefined) return [];

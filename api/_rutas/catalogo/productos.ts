@@ -2,10 +2,10 @@
 //   POST   { nombre, categoria, precio }                 → crea un producto del menú
 //   PATCH  { id, nombre, categoria, precio, activo }     → lo edita (el cambio de precio queda en auditoría)
 //   DELETE { id }                                        → lo elimina, si nunca se ha vendido
-import { auditar, conUsuario } from '../_lib/auth';
-import { idCategoria, yaUsado } from '../_lib/catalogo';
-import { esUuid } from '../_lib/db';
-import { ErrorApi, json, leerJson, pesos, ruta, texto } from '../_lib/http';
+import { auditar, conUsuario } from '../../_lib/auth';
+import { idCategoria, yaUsado } from '../../_lib/catalogo';
+import { esUuid } from '../../_lib/db';
+import { ErrorApi, json, leerJson, pesos, ruta, texto } from '../../_lib/http';
 
 const fmt = (n: number) => '$' + n.toLocaleString('es-CO');
 const leerId = (v: unknown) => { if (!esUuid(v)) throw new ErrorApi(400, 'Falta el producto'); return v; };
