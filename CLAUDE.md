@@ -14,9 +14,10 @@ Navegador (public/)  ──HTTPS──>  API serverless en Vercel (/api, Node + 
 
 - `public/`: la app que funciona hoy. HTML, CSS y JavaScript puro, sin compilar. Guarda todo en `localStorage` a través de `public/store.js`.
 - `public/store.js` es la **única puerta a los datos**. Al conectar la API se reemplazan sus funciones (`load`, `save`, `mov`…) por llamadas HTTP; las pantallas (`app.js`, `turno.js`, `pos.js`, `reportes.js`) no deberían tener que reescribirse.
-- `schema.sql`: esquema de Neon con `tenant_id` y Row Level Security. Todavía no lo usa nada.
+- `db/migrations/`: esquema de Neon en archivos numerados (`001_…`, `002_…`). Nunca se edita una migración ya aplicada en Neon: los cambios van en un archivo nuevo, que también da sus permisos a `app_user`.
+- `db/pruebas/probar.sh`: aplica las migraciones en un Postgres **local** y prueba el aislamiento entre negocios y que el dinero no se pueda editar. Correrlo después de cualquier cambio en `db/`.
 - `LEEME.md`: manual de uso del negocio (flujo del día, cómo evita fugas).
-- Lee `LEEME.md`, `schema.sql` y los `.js` que vayas a tocar antes de cambiar algo.
+- Lee `LEEME.md`, `db/migrations/` y los `.js` que vayas a tocar antes de cambiar algo.
 
 ## Reglas de arquitectura y seguridad (obligatorias)
 
@@ -25,7 +26,7 @@ Navegador (public/)  ──HTTPS──>  API serverless en Vercel (/api, Node + 
 3. **Cada negocio aislado con `tenant_id` y Row Level Security.** En cada petición la API hace `SET LOCAL app.tenant_id = '<uuid>'` dentro de una transacción. La API se conecta con el rol `app_user` (sin permisos de owner, así no se salta RLS). El `tenant_id` sale de la sesión del usuario en el servidor, nunca de lo que mande el navegador.
 4. **Permisos verificados en el servidor en cada llamada.** Lo que el frontend oculte o muestre es solo comodidad; la API vuelve a revisar el permiso (`pos.cobrar`, `turno.operar`, etc.). Contraseñas con bcrypt o argon2 en la API; sesión con cookie `httpOnly`, `Secure`, `SameSite`.
 5. **El dinero se maneja con un libro contable que no se edita ni se borra** (`ledger_entries`). El saldo de cada cuenta es la suma del libro, nunca un número guardado aparte. Un error se corrige con un movimiento nuevo de ajuste o reverso, con motivo y usuario. Lo mismo para `payments` y `audit_log`: a `app_user` se le quitan `UPDATE` y `DELETE` en esas tablas.
-6. Dinero en **pesos enteros** (`bigint`), nunca con decimales ni `float`.
+6. Dinero en **pesos enteros** (`bigint`), nunca con decimales ni `float`. Postgres redondea en silencio un `1000.5` a `1001`, así que **la API rechaza cualquier monto que no sea entero** (`Number.isSafeInteger`).
 7. Toda acción sensible (anulaciones, ajustes de stock, cambios de precio, descuadres) queda en auditoría con usuario y motivo.
 
 ## Idioma, formatos y fechas
@@ -49,4 +50,7 @@ Navegador (public/)  ──HTTPS──>  API serverless en Vercel (/api, Node + 
 - **Pre-cuenta:** lo que salió en la pre-cuenta impresa solo se quita anulando (permiso `pos.anular` y motivo). Lo agregado después y aún no enviado a cocina se puede corregir libremente. La API debe respetar la misma regla.
 - **Permisos:** la fuente de verdad es el servidor (fase 2). El frontend solo oculta botones.
 - **Importación del respaldo:** los usuarios no se importan con sus claves actuales. Cada persona crea una contraseña nueva, que se guarda con bcrypt o argon2 en la API.
-- **Neon:** el dueño está creando la cuenta desde cero. Proyecto `loschamos-pos` en AWS US East 1 (N. Virginia), cerca de la región por defecto de Vercel. La cadena de conexión nunca se pega en el chat ni en el código.
+- **Ingreso:** con **código de negocio** (ej. `loschamos`) + usuario + contraseña; no por subdominio. La función `tenant_por_codigo()` convierte el código en el id del negocio.
+- **Sesión:** la cookie trae el negocio y un token al azar; la API fija ese negocio y busca el hash del token *dentro de ese negocio*, así un token solo sirve en su propio negocio.
+- **Vercel:** el dueño ya tiene cuenta.
+- **Neon:** cuenta creada. Proyecto `loschamos-pos` en AWS US East 1 (N. Virginia), cerca de la región por defecto de Vercel. La cadena de conexión nunca se pega en el chat ni en el código.

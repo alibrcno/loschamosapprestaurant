@@ -13,7 +13,7 @@ Punto de venta, control de turno, inventario y finanzas para restaurante de comi
 | `public/pos.js` | Mesas, domicilios, pedidos, pizzas, comandas, pre-cuenta, cobro y pantalla de cocina. |
 | `public/reportes.js` | Saldos por cuenta, historial de turnos, resumen del mes, movimientos y auditoría. |
 | `public/styles.css` | Diseño. |
-| `schema.sql` | Base de datos para Neon (fase 2). No lo usa la app todavía. |
+| `db/` | Base de datos para Neon (fase 2): migraciones, clave de `app_user`, semilla de Los Chamos y pruebas de seguridad. No lo usa la app todavía. |
 
 Los 7 archivos de la app viven juntos en la carpeta `public/` (es la carpeta que Vercel publica). Las reglas del proyecto para trabajar con Claude están en `CLAUDE.md`.
 
@@ -74,9 +74,9 @@ Celulares / PC (esta app)  ──HTTPS──>  API (Vercel o Netlify Functions, 
 
 El navegador **nunca** se conecta directo a Neon: la cadena de conexión daría acceso total a la base de todos los negocios.
 
-1. **Neon:** crea el proyecto (región `us-east`), ejecuta `schema.sql`, crea el rol `app_user` y usa su cadena de conexión solo en la API (variable de entorno `DATABASE_URL`).
+1. **Neon:** proyecto en AWS US East 1. Se ejecutan en orden `db/migrations/001_esquema.sql`, `002_app_user.sql`, `db/clave_app_user.sql` y `db/semillas/loschamos.sql`. La API usa la cadena de conexión de `app_user`, solo como variable de entorno (`DATABASE_URL`).
 2. **API:** endpoints `/auth/login`, `/shifts`, `/orders`, `/payments`, `/inventory`, `/ledger`, `/reports`. Claves con bcrypt, sesión con cookie httpOnly. Los permisos se revisan **en el servidor** en cada llamada.
-3. **Multitenant:** cada negocio tiene su `tenant_id`; la API hace `SET LOCAL app.tenant_id` por petición y Row Level Security impide ver datos de otro negocio. Ingreso por subdominio (`loschamos.tuapp.com`) o código de negocio.
+3. **Multitenant:** cada negocio tiene su `tenant_id`; la API hace `SET LOCAL app.tenant_id` por petición y Row Level Security impide ver datos de otro negocio. Se ingresa con **código de negocio** (`loschamos`) + usuario + contraseña.
 4. **Frontend:** se reemplazan las funciones de `store.js` (`load`, `save`, `mov`…) por llamadas a la API. El resto de la app no cambia.
 5. **Tiempo real:** comandas nuevas en la pantalla de cocina y mesas actualizadas en todos los equipos (consulta cada pocos segundos al inicio; luego WebSockets o Server-Sent Events).
 6. **WhatsApp automático:** WhatsApp Business Cloud API (Meta) con plantillas aprobadas, o Twilio. El cierre se envía solo sin tocar nada.
