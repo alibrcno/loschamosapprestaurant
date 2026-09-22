@@ -20,6 +20,7 @@ Navegador (public/)  ──HTTPS──>  API serverless en Vercel (/api, Node + 
   - `db.ts`: conexión con `pg` y `conNegocio(tenantId, fn)`, que abre transacción y fija el negocio.
   - `auth.ts`: contraseñas (bcryptjs), sesiones, `conUsuario(req, permiso, fn)` y `auditar()`. **Toda ruta protegida entra por `conUsuario`**, y revisa el permiso antes de validar datos o cifrar claves.
   - `http.ts`: `ruta()`, `leerJson()` (exige JSON, protege de CSRF), `texto()`, `pesos()` (solo enteros).
+- `public/instalar.html`: pantalla de un solo uso para crear el primer administrador (usa `/api/auth/instalar`).
 - Rutas hechas: `/api/salud`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/yo`, `/api/auth/instalar` (primer admin, exige `CLAVE_INSTALACION`), `/api/usuarios`.
 - Pruebas: `PGHOST=… PGPORT=… npm run probar` corre las pruebas de la base y de la API (`pruebas/api.test.ts`) en un Postgres local. `npm run revisar` revisa TypeScript.
 - Dependencias aprobadas: `pg` (conexión a Neon, la misma en pruebas locales), `bcryptjs`, `typescript`, `@types/*`. Nada más sin preguntar.
