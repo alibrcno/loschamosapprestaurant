@@ -2,6 +2,7 @@
 // Llaman a las rutas igual que lo haría Vercel: con un Request y esperando un Response.
 import assert from 'node:assert/strict';
 import { after, describe, test } from 'node:test';
+import * as equipo from '../api/equipo';
 import * as instalar from '../api/auth/instalar';
 import * as login from '../api/auth/login';
 import * as logout from '../api/auth/logout';
@@ -135,6 +136,14 @@ describe('API: ingreso, sesiones y usuarios', () => {
     const r = await llamar(usuarios.PATCH, 'PATCH', { id: yoAdmin.id, rol: 'mesera' }, admin);
     assert.equal(r.status, 400);
     assert.equal((await llamar(yo.GET, 'GET', undefined, admin)).datos.usuario.rol, 'admin', 'el cambio se deshizo');
+  });
+
+  test('El personal para la apertura muestra solo nombres y exige permiso de caja', async () => {
+    const r = await llamar(equipo.GET, 'GET', undefined, admin);
+    assert.equal(r.status, 200);
+    assert.ok(r.datos.equipo.some((u: any) => u.nombre === 'María'));
+    assert.deepEqual(Object.keys(r.datos.equipo[0]).sort(), ['id', 'nombre', 'rol'], 'no expone usuario, permisos ni claves');
+    assert.equal((await llamar(equipo.GET, 'GET', undefined, mesera)).status, 403, 'la mesera no abre caja');
   });
 
   test('Desactivar a alguien lo saca de todos sus equipos', async () => {

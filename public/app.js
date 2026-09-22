@@ -10,7 +10,6 @@
   LC.V = {}; // vistas
   LC.A = {}; // acciones
   LC.state = { view: 'inicio', params: {} };
-  const SES = 'lc2_sesion_' + LC.TENANT;
 
   /* ---------------- UI base ---------------- */
   let toastTimer;
@@ -123,79 +122,67 @@
   }
   const inicioPorRol = (u) => (u.rol === 'cocina' ? 'cocina' : u.rol === 'mesera' ? 'pos' : 'inicio');
 
-  /* ---------------- login y primer uso ---------------- */
+  /* ---------------- ingreso (validado en el servidor) ---------------- */
+  // El código del negocio se recuerda en este equipo para no escribirlo cada vez
+  const COD = 'lc2_codigo';
+  const codigoGuardado = () => { try { return localStorage.getItem(COD) || ''; } catch (e) { return ''; } };
+
   function renderLogin() {
     document.body.classList.add('is-login');
     $('#top').innerHTML = '';
     $('#nav').innerHTML = '';
-    const setup = LC.db.usuarios.length === 0;
     $('#main').innerHTML = `
     <div class="login">
       <div class="login-brand"><div class="logo-mark">LC</div><h1>${esc(LC.db.config.negocio)}</h1><p>Punto de venta y control de turno</p></div>
-      ${setup ? `
-      <form class="card form" data-submit="setup" autocomplete="off">
-        <h2>Configura tu negocio</h2>
-        <p class="muted">Crea la cuenta del administrador. Con ella crearás a la encargada, meseras y cocina, y les darás permisos.</p>
-        <label>Nombre del negocio<input name="negocio" value="${esc(LC.db.config.negocio)}" required></label>
-        <label>Tu nombre<input name="nombre" required></label>
-        <label>Usuario<input name="usuario" required autocapitalize="none" pattern="[a-zA-Z0-9._\\-]{3,}" title="Mínimo 3 caracteres, sin espacios"></label>
-        <label>Contraseña<input type="password" name="clave" required minlength="6"></label>
-        <label>Repite la contraseña<input type="password" name="clave2" required minlength="6"></label>
-        <button class="btn primary lg block">Crear administrador</button>
-      </form>` : `
       <form class="card form" data-submit="login">
         <h2>Ingresar</h2>
+        <label>Código del negocio<input name="codigo" required autocapitalize="none" autocomplete="organization" value="${esc(codigoGuardado())}"></label>
         <label>Usuario<input name="usuario" required autocapitalize="none" autocomplete="username"></label>
         <label>Contraseña<input type="password" name="clave" required autocomplete="current-password"></label>
         <button class="btn primary lg block">Ingresar</button>
-      </form>`}
+      </form>
       <p class="version">v${LC.VERSION}</p>
     </div>`;
   }
 
-  LC.crearCredencial = async (clave) => { const salt = LC.uid() + LC.uid(); return { salt, hash: await LC.hash(clave, salt) }; };
-
-  LC.A.setup = async (d) => {
-    if (d.clave !== d.clave2) return LC.toast('Las contraseñas no coinciden', 'error');
-    const cred = await LC.crearCredencial(d.clave);
-    const u = {
-      id: LC.uid(), nombre: d.nombre.trim(), usuario: d.usuario.trim().toLowerCase(),
-      salt: cred.salt, hash: cred.hash, rol: 'admin', permisos: Object.keys(LC.PERMISOS), activo: true, creadoEn: new Date().toISOString()
-    };
-    LC.db.config.negocio = d.negocio.trim() || 'Los Chamos';
-    LC.db.usuarios.push(u);
-    iniciar(u);
+  // Trae del servidor quién está conectado (y el personal, si le toca abrir caja)
+  async function cargarSesion() {
+    const r = await LC.api('auth/yo');
+    LC.user = Object.assign({ activo: true }, r.usuario);
+    LC.negocio = r.negocio;
+    await LC.cargarEquipo();
+  }
+  LC.cargarEquipo = async () => {
+    if (!LC.can('turno.operar')) return;
+    try { LC.equipo = (await LC.api('equipo')).equipo; } catch (e) { console.warn('No se pudo cargar el personal', e); }
   };
 
-  let fallos = 0, bloqueoHasta = 0;
-  LC.A.login = async (d) => {
-    if (Date.now() < bloqueoHasta) return LC.toast('Demasiados intentos. Espera un minuto.', 'error');
-    const u = LC.db.usuarios.find((x) => x.usuario === d.usuario.trim().toLowerCase() && x.activo);
-    const ok = u && (await LC.hash(d.clave, u.salt)) === u.hash;
-    if (!ok) {
-      if (++fallos >= 5) { bloqueoHasta = Date.now() + 60000; fallos = 0; }
-      return LC.toast('Usuario o contraseña incorrectos', 'error');
+  LC.A.login = async (d, f) => {
+    const btn = f.querySelector('button');
+    btn.disabled = true;
+    try {
+      await LC.api('auth/login', { method: 'POST', body: { codigo: d.codigo, usuario: d.usuario, clave: d.clave } });
+      try { localStorage.setItem(COD, d.codigo.trim().toLowerCase()); } catch (e) { /* sin almacenamiento */ }
+      await cargarSesion();
+    } catch (e) {
+      btn.disabled = false;
+      return LC.toast(e.message, 'error');
     }
-    fallos = 0;
-    iniciar(u);
-  };
-
-  function iniciar(u) {
-    LC.user = u;
-    sessionStorage.setItem(SES, u.id);
     LC.log('Inicio de sesión');
     LC.save();
-    LC.go(inicioPorRol(u));
-  }
+    LC.go(inicioPorRol(LC.user));
+  };
 
-  LC.A.salir = () => {
+  LC.A.salir = async () => {
     LC.log('Cierre de sesión');
     LC.save();
-    sessionStorage.removeItem(SES);
     LC.user = null;
+    LC.equipo = [];
+    usuariosSrv = null;
     if (LC.wizReset) LC.wizReset();
     LC.cerrarModal();
     LC.render();
+    try { await LC.api('auth/logout', { method: 'POST' }); } catch (e) { /* la cookie vence sola */ }
   };
 
   /* ---------------- inicio ---------------- */
@@ -403,25 +390,37 @@
     LC.log('Configuración editada'); LC.save(); LC.toast('Guardado'); LC.render();
   };
 
-  /* ---------------- usuarios y permisos ---------------- */
+  /* ---------------- usuarios y permisos (guardados en el servidor) ---------------- */
+  let usuariosSrv = null, cargandoUsuarios = false;
+  async function cargarUsuarios() {
+    if (cargandoUsuarios) return;
+    cargandoUsuarios = true;
+    try { usuariosSrv = (await LC.api('usuarios')).usuarios; }
+    catch (e) { return LC.toast(e.message, 'error'); }
+    finally { cargandoUsuarios = false; }
+    if (LC.state.view === 'ajustes' && !$('#modal-root').innerHTML) LC.render();
+  }
   function tabUsuarios() {
+    if (!usuariosSrv) { cargarUsuarios(); return '<p class="muted">Cargando usuarios…</p>'; }
     return `<button class="btn primary" data-a="userForm">+ Nuevo usuario</button>
-    <div class="list">${LC.db.usuarios.map((u) => `
+    <p class="muted">Tú creas la contraseña de cada persona. Si alguien la olvida o se bloquea por intentos fallidos, ponle una nueva aquí.</p>
+    <div class="list">${usuariosSrv.map((u) => `
       <button class="list-item" data-a="userForm" data-id="${u.id}">
         <div><strong>${esc(u.nombre)}</strong><small>@${esc(u.usuario)}, ${esc((LC.ROLES[u.rol] || {}).nombre || u.rol)}</small></div>
-        <div class="right">${u.activo ? '<span class="tag ok">Activo</span>' : '<span class="tag">Inactivo</span>'}<small>${u.rol === 'admin' ? 'Acceso total' : (u.permisos || []).length + ' permisos'}</small></div>
+        <div class="right">${u.bloqueado ? '<span class="tag bad">Bloqueado</span>' : u.activo ? '<span class="tag ok">Activo</span>' : '<span class="tag">Inactivo</span>'}<small>${u.rol === 'admin' ? 'Acceso total' : (u.permisos || []).length + ' permisos'}</small></div>
       </button>`).join('')}</div>`;
   }
   LC.A.userForm = (d) => {
-    const u = d.id ? LC.db.usuarios.find((x) => x.id === d.id) : null;
+    const u = d.id ? (usuariosSrv || []).find((x) => x.id === d.id) : null;
     const rol = u ? u.rol : 'mesera';
     const perms = u ? u.permisos : LC.ROLES[rol].permisos;
     LC.modal(`${LC.modalHead(u ? 'Editar ' + u.nombre : 'Nuevo usuario')}
       <form class="form" data-submit="userGuardar" autocomplete="off">
         <input type="hidden" name="id" value="${u ? u.id : ''}">
         <label>Nombre completo<input name="nombre" value="${u ? esc(u.nombre) : ''}" required></label>
-        <label>Usuario para ingresar<input name="usuario" value="${u ? esc(u.usuario) : ''}" required autocapitalize="none" pattern="[a-zA-Z0-9._\\-]{3,}"></label>
-        <label>${u ? 'Nueva contraseña (déjala vacía para no cambiarla)' : 'Contraseña'}<input type="password" name="clave" minlength="6" ${u ? '' : 'required'} autocomplete="new-password"></label>
+        <label>Usuario para ingresar<input name="usuario" value="${u ? esc(u.usuario) : ''}" required autocapitalize="none" pattern="[a-zA-Z0-9._\\-]{3,30}" title="De 3 a 30 letras o números, sin espacios"></label>
+        <label>${u ? 'Nueva contraseña (déjala vacía para no cambiarla)' : 'Contraseña'}<input type="password" name="clave" minlength="4" ${u ? '' : 'required'} autocomplete="new-password"></label>
+        <p class="muted">Mínimo 4 caracteres; para un administrador, mínimo 8.${u && u.bloqueado ? ' <strong>Este usuario está bloqueado:</strong> ponle una contraseña nueva para desbloquearlo.' : ''}</p>
         <label>Rol<select name="rol" data-ch="rolCambio">${Object.entries(LC.ROLES).map(([k, r]) => `<option value="${k}" ${k === rol ? 'selected' : ''}>${r.nombre}</option>`).join('')}</select></label>
         <fieldset><legend>Permisos</legend><div class="checks col">
           ${Object.entries(LC.PERMISOS).map(([k, t]) => `<label class="check"><input type="checkbox" name="perm" value="${k}" ${perms.includes(k) ? 'checked' : ''} ${rol === 'admin' ? 'disabled' : ''}><span>${t}</span></label>`).join('')}
@@ -435,22 +434,22 @@
     el.form.querySelectorAll('input[name=perm]').forEach((c) => { c.checked = def.includes(c.value); c.disabled = el.value === 'admin'; });
   };
   LC.A.userGuardar = async (d, f) => {
-    const usuario = d.usuario.trim().toLowerCase();
-    if (LC.db.usuarios.some((x) => x.usuario === usuario && x.id !== d.id)) return LC.toast('Ese usuario ya existe', 'error');
-    const permisos = d.rol === 'admin' ? Object.keys(LC.PERMISOS) : new FormData(f).getAll('perm');
-    const activo = !!d.activo;
-    let u = d.id ? LC.db.usuarios.find((x) => x.id === d.id) : null;
-    const quedanAdmins = LC.db.usuarios.filter((x) => x.activo && x.rol === 'admin' && x.id !== d.id).length;
-    if (u && u.rol === 'admin' && (d.rol !== 'admin' || !activo) && quedanAdmins === 0) return LC.toast('Debe quedar al menos un administrador activo', 'error');
-    if (u && u.id === LC.user.id && !activo) return LC.toast('No puedes desactivar tu propio usuario', 'error');
-    if (!u) {
-      u = { id: LC.uid(), creadoEn: new Date().toISOString() };
-      LC.db.usuarios.push(u);
+    const datos = { nombre: d.nombre, usuario: d.usuario, rol: d.rol, activo: !!d.activo };
+    if (d.rol !== 'admin') datos.permisos = new FormData(f).getAll('perm');
+    if (d.clave) datos.clave = d.clave;
+    const btn = f.querySelector('button.primary');
+    btn.disabled = true;
+    try {
+      if (d.id) await LC.api('usuarios', { method: 'PATCH', body: Object.assign({ id: d.id }, datos) });
+      else await LC.api('usuarios', { method: 'POST', body: datos });
+      if (d.id === LC.user.id) await cargarSesion(); // mis propios permisos pudieron cambiar
+      else await LC.cargarEquipo();
+    } catch (e) {
+      btn.disabled = false;
+      return LC.toast(e.message, 'error');
     }
-    Object.assign(u, { nombre: d.nombre.trim(), usuario, rol: d.rol, permisos, activo });
-    if (d.clave) Object.assign(u, await LC.crearCredencial(d.clave));
-    LC.log(d.id ? 'Usuario editado' : 'Usuario creado', `${u.nombre} (${d.rol})${d.clave && d.id ? ', contraseña cambiada' : ''}`);
-    LC.save(); LC.cerrarModal(); LC.toast('Usuario guardado'); LC.render();
+    usuariosSrv = null;
+    LC.cerrarModal(); LC.toast('Usuario guardado'); LC.render();
   };
 
   /* ---------------- respaldo de datos ---------------- */
@@ -491,14 +490,27 @@
   };
   LC.A.reiniciar = () => {
     if (prompt('Escribe BORRAR para eliminar todos los datos') !== 'BORRAR') return;
-    localStorage.removeItem(LC.KEY); sessionStorage.removeItem(SES); location.reload();
+    localStorage.removeItem(LC.KEY); location.reload();
   };
 
   /* ---------------- arranque ---------------- */
-  LC.boot = () => {
-    const id = sessionStorage.getItem(SES);
-    const u = id && LC.db.usuarios.find((x) => x.id === id && x.activo);
-    if (u) { LC.user = u; LC.state.view = inicioPorRol(u); }
+  LC.boot = async () => {
+    // Si el servidor dice que la sesión venció (clave cambiada, usuario desactivado…), vuelve al ingreso
+    LC.onSesionVencida = () => {
+      if (!LC.user) return;
+      LC.user = null; LC.equipo = []; usuariosSrv = null;
+      if (LC.wizReset) LC.wizReset();
+      LC.cerrarModal(); LC.render();
+      LC.toast('Tu sesión terminó. Ingresa de nuevo.', 'error');
+    };
+    $('#main').innerHTML = '<div class="login"><p class="muted">Cargando…</p></div>';
+    try {
+      await cargarSesion();
+      LC.state.view = inicioPorRol(LC.user);
+    } catch (e) {
+      LC.user = null;
+      if (e.status !== 401) setTimeout(() => LC.toast(e.message, 'error'), 0);
+    }
     LC.render();
     // Si la app está abierta en otra pestaña del mismo equipo (ej. pantalla de cocina), se sincroniza.
     // No se redibuja mientras alguien escribe en un formulario, para no borrarle lo que lleva.
@@ -509,7 +521,6 @@
     window.addEventListener('storage', (e) => {
       if (e.key !== LC.KEY) return;
       LC.db = LC.load();
-      if (LC.user) LC.user = LC.db.usuarios.find((x) => x.id === LC.user.id && x.activo) || null;
       if (!LC.user) return LC.render();
       if (!$('#modal-root').innerHTML && !escribiendo()) LC.render();
     });

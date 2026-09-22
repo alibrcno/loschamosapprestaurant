@@ -9,7 +9,7 @@
 'use strict';
 (function () {
   const LC = (window.LC = window.LC || {});
-  LC.VERSION = '2.0.0';
+  LC.VERSION = '2.1.0';
   LC.TENANT = 'loschamos'; // en fase 2 viene del login (multi-negocio)
   LC.KEY = 'lc2_' + LC.TENANT;
 
@@ -67,16 +67,31 @@
   // 0 = domingo ... 6 = sábado, según el día en Colombia
   LC.diaSemana = (iso) => new Date(LC.diaLocal(new Date(iso)) + 'T12:00:00Z').getUTCDay();
 
-  LC.hash = async (texto, salt) => {
-    const data = new TextEncoder().encode(salt + '::' + texto);
-    if (window.crypto && crypto.subtle) {
-      const buf = await crypto.subtle.digest('SHA-256', data);
-      return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  /* ---------------- servidor (API) ---------------- */
+  // Única forma de hablar con el servidor. La sesión viaja en una cookie que JavaScript no
+  // puede leer; el servidor revisa usuario y permisos en cada llamada.
+  LC.api = async (ruta, { method = 'GET', body } = {}) => {
+    let r;
+    try {
+      r = await fetch('/api/' + ruta, {
+        method, credentials: 'same-origin',
+        headers: body === undefined ? {} : { 'content-type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body)
+      });
+    } catch (e) {
+      throw new Error('No hay conexión con el servidor. Revisa el internet e intenta de nuevo.');
     }
-    let h1 = 0x811c9dc5, h2 = 0x1b873593;
-    for (const b of data) { h1 = Math.imul(h1 ^ b, 16777619); h2 = Math.imul(h2 ^ b, 2246822507); }
-    return 'fnv' + (h1 >>> 0).toString(16) + (h2 >>> 0).toString(16);
+    let datos = {};
+    try { datos = await r.json(); } catch (e) { /* respuesta sin JSON */ }
+    if (!r.ok) {
+      if (r.status === 401 && LC.onSesionVencida) LC.onSesionVencida();
+      const err = new Error(datos.error || `El servidor no respondió bien (${r.status}). Intenta de nuevo.`);
+      err.status = r.status;
+      throw err;
+    }
+    return datos;
   };
+  LC.equipo = []; // personal activo del negocio, viene del servidor (para la apertura de caja)
 
   /* ---------------- datos iniciales ---------------- */
   function seed(migrar) {

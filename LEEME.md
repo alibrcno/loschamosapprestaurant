@@ -19,9 +19,9 @@ Los 7 archivos de la app viven juntos en la carpeta `public/` (es la carpeta que
 
 ## Primer uso
 
-1. Abre `public/index.html`. Como no hay usuarios, te pide crear el **administrador** (tú).
+1. El administrador (tú) se crea una sola vez en `/instalar.html` con la clave de instalación. Después se ingresa en la app con **código del negocio** (`loschamos`) + usuario + contraseña.
 2. En **Ajustes** revisa: Menú y precios, Pizzas (precios por tamaño, valor del sabor adicional, sabores), Bebidas, Utensilios e Insumos (costo unitario y **stock sugerido**), Negocio (WhatsApp, número de mesas, ancho del ticket 58/80 mm).
-3. En **Ajustes → Usuarios** crea a la encargada, meseras y cocina con usuario y contraseña. El rol pone permisos por defecto y puedes marcar o quitar permisos uno por uno.
+3. En **Ajustes → Usuarios** crea a la encargada, meseras y cocina con usuario y contraseña (tú se la pones: mínimo 4 caracteres; administradores mínimo 8). El rol pone permisos por defecto y puedes marcar o quitar permisos uno por uno. Si alguien olvida su clave o se bloquea tras 5 intentos, ponle una nueva.
 
 Los datos de la versión anterior (bebidas, utensilios, insumos) se importan solos. Los usuarios viejos no, porque tenían claves de 4 dígitos sin protección.
 

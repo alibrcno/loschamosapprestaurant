@@ -27,7 +27,11 @@
   LC.V.apertura = () => {
     if (!LC.can('turno.operar')) return LC.sinPermiso();
     if (LC.turno()) return `<div class="empty"><h2>La caja ya está abierta</h2><button class="btn" data-a="go" data-v="caja">Ir a caja</button></div>`;
-    if (!W || W.tipo !== 'apertura') W = { tipo: 'apertura', paso: 0, personal: [], bebidas: null, utensilios: null, saldos: null };
+    if (!W || W.tipo !== 'apertura') {
+      W = { tipo: 'apertura', paso: 0, personal: [], bebidas: null, utensilios: null, saldos: null };
+      // El personal viene del servidor; si no alcanzó a cargar al ingresar, se pide de nuevo
+      if (!LC.equipo.length) LC.cargarEquipo().then(() => { if (LC.state.view === 'apertura' && W && W.paso === 0 && LC.equipo.length) LC.render(); });
+    }
     const nav = (txt) => `<div class="wiz-nav">${W.paso > 0 ? '<button type="button" class="btn" data-a="wizAtras">Atrás</button>' : '<button type="button" class="btn ghost" data-a="wizCancelar">Cancelar</button>'}<button class="btn primary lg">${txt}</button></div>`;
     let body = '';
 
@@ -36,7 +40,7 @@
       body = `<form class="card form" data-submit="apPersonal">
         <h2>¿Quién trabaja hoy?</h2>
         <p class="muted">Queda registrado para contar los días trabajados de cada persona en el mes. Debe haber al menos una persona en cocina.</p>
-        ${LC.db.usuarios.filter((u) => u.activo).map((u) => `
+        ${LC.equipo.map((u) => `
           <label class="row-count"><span>${esc(u.nombre)}<small>${esc((LC.ROLES[u.rol] || {}).nombre || u.rol)}</small></span>
           <select name="p_${u.id}"><option value="">No trabaja hoy</option>${LC.AREAS.map((a) => `<option ${sel(u.id) === a ? 'selected' : ''}>${a}</option>`).join('')}</select></label>`).join('')}
         <p class="muted">¿Alguien sin usuario en la app?</p>
@@ -82,7 +86,7 @@
 
   LC.A.apPersonal = (d) => {
     const personal = [];
-    LC.db.usuarios.forEach((u) => { if (d['p_' + u.id]) personal.push({ id: u.id, nombre: u.nombre, area: d['p_' + u.id] }); });
+    LC.equipo.forEach((u) => { if (d['p_' + u.id]) personal.push({ id: u.id, nombre: u.nombre, area: d['p_' + u.id] }); });
     [1, 2].forEach((i) => { const n = (d['xn' + i] || '').trim(); if (n) personal.push({ id: null, nombre: n, area: d['xa' + i] }); });
     if (!personal.length) return LC.toast('Marca quién trabaja hoy', 'error');
     if (!personal.some((p) => p.area === 'Cocina')) return LC.toast('Indica quién está en cocina hoy', 'error');
