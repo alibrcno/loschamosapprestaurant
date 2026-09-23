@@ -14,6 +14,7 @@ import * as negocio from './_rutas/catalogo/negocio';
 import * as pizzas from './_rutas/catalogo/pizzas';
 import * as productos from './_rutas/catalogo/productos';
 import * as auditoria from './_rutas/auditoria';
+import * as avisos from './_rutas/avisos';
 import * as equipo from './_rutas/equipo';
 import * as salud from './_rutas/salud';
 import * as turnoAbrir from './_rutas/turno/abrir';
@@ -44,6 +45,7 @@ export const RUTAS: Record<string, Modulo> = {
   'catalogo/pizzas': pizzas,
   'catalogo/productos': productos,
   auditoria,
+  avisos,
   equipo,
   salud,
   turno: turnoEstado,

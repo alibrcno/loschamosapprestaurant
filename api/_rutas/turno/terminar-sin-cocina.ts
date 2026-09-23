@@ -2,6 +2,7 @@
 // { motivo }  → si cocina no hizo su inventario de cierre, termina el turno igual para poder
 // abrir el siguiente. El resultado del día queda SIN el costo de insumos y queda anotado por qué.
 import { auditar, conUsuario } from '../../_lib/auth';
+import { avisarCierre } from '../../_lib/avisos';
 import { ErrorApi, json, leerJson, ruta, texto } from '../../_lib/http';
 import { actualizarTurno, leerEstado, turnoActual } from '../../_lib/turno';
 
@@ -15,7 +16,8 @@ export const POST = ruta(async (req) => {
     await db.query('UPDATE shifts SET cocina_cierre = $2 WHERE id = $1', [t.id, JSON.stringify({ sinInventario: true, motivo, en: new Date().toISOString(), por: u.nombre })]);
     await actualizarTurno(db, u, t.id);
     await auditar(db, u.tenant_id, u.id, 'Turno terminado sin inventario de cocina', motivo);
-    return { ...(await leerEstado(db, u)), turnoId: t.id, termino: true };
+    return { ...(await leerEstado(db, u)), tenantId: u.tenant_id, turnoId: t.id, termino: true };
   });
-  return json(r, 201);
+  const avisos = await avisarCierre(r.tenantId, r.turnoId, true);
+  return json({ ...r, tenantId: undefined, avisos }, 201);
 });

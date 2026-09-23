@@ -4,6 +4,7 @@
 // queda el ajuste en el libro y se exige explicación. Después de esto no se vende más en el turno.
 // El turno termina cuando cocina haga su inventario (o ya lo hizo antes): ahí sale la utilidad.
 import { auditar, conUsuario } from '../../_lib/auth';
+import { avisarCierre } from '../../_lib/avisos';
 import { ErrorApi, json, leerJson, ruta } from '../../_lib/http';
 import {
   actualizarTurno, calcularResumen, cuentas, exigirCajaAbierta, guardarConteo, itemsDe, leerConteo, leerEstado, leerObs,
@@ -54,7 +55,9 @@ export const POST = ruta(async (req) => {
     const termino = await actualizarTurno(db, u, t.id);
     const totalDesc = Object.values(descuadre).reduce((a, x) => a + x, 0);
     await auditar(db, u.tenant_id, u.id, 'Cierre de caja', `Ventas $${previo.ventas.toLocaleString('es-CO')}, descuadre $${totalDesc.toLocaleString('es-CO')}${termino ? '. Turno terminado' : '. Falta el inventario de cocina'}`);
-    return { ...(await leerEstado(db, u)), turnoId: t.id, termino };
+    return { ...(await leerEstado(db, u)), tenantId: u.tenant_id, turnoId: t.id, termino };
   });
-  return json(r, 201);
+  // Aviso al dueño: caja cerrada (o reporte completo si cocina ya había contado)
+  const avisos = await avisarCierre(r.tenantId, r.turnoId, r.termino);
+  return json({ ...r, tenantId: undefined, avisos }, 201);
 });

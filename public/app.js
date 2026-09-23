@@ -438,8 +438,59 @@
       </div>
       <label class="check"><input type="checkbox" name="imprimirComandas" ${c.imprimirComandas ? 'checked' : ''}><span>Imprimir comanda al enviarla a cocina</span></label>
       <button class="btn primary">Guardar</button>
-    </form>`;
+    </form>
+    ${LC.can('reportes.ver') ? avisosHTML() : ''}`;
   }
+
+  /* ---------- avisos del cierre (Telegram y correo, los envía el servidor) ---------- */
+  let avisosSrv = null, enlaceTelegram = '';
+  function cargarAvisos() {
+    LC.api('avisos').then((r) => { avisosSrv = r; if (LC.state.view === 'ajustes' && !$('#modal-root').innerHTML) LC.render(); })
+      .catch((e) => LC.toast(e.message, 'error'));
+  }
+  function avisosHTML() {
+    if (!avisosSrv) { cargarAvisos(); return '<div class="card"><p class="muted">Cargando avisos…</p></div>'; }
+    const a = avisosSrv, tg = a.telegram, co = a.correo;
+    const telegram = !tg.disponible
+      ? '<p class="notice">Falta crear el bot de Telegram del servidor (variable TELEGRAM_BOT_TOKEN en Vercel).</p>'
+      : tg.conectado
+        ? '<p><span class="tag ok">Telegram conectado</span> <button type="button" class="btn sm ghost" data-a="avisoTelegramQuitar">Desconectar</button></p>'
+        : enlaceTelegram
+          ? `<p class="muted">1. Abre Telegram con este botón y toca <strong>Iniciar</strong> (Start). 2. Vuelve aquí y confirma.</p>
+             <a class="btn primary" href="${esc(enlaceTelegram)}" target="_blank" rel="noopener">Abrir Telegram</a>
+             <button type="button" class="btn" data-a="avisoTelegramConfirmar">Ya toqué Iniciar</button>`
+          : '<button type="button" class="btn primary" data-a="avisoTelegramConectar">Conectar mi Telegram</button>';
+    const correo = !co.disponible
+      ? '<p class="notice">Falta la clave del servicio de correo (variable RESEND_API_KEY en Vercel).</p>'
+      : `<form class="row-edit" data-submit="avisoCorreo"><input type="email" name="correo" value="${esc(co.correo)}" placeholder="tu@correo.com" aria-label="Correo"><button class="btn sm">Guardar correo</button></form>`;
+    return `<div class="card form">
+      <h3>Avisos del cierre</h3>
+      <p class="muted">Cuando la encargada cierre la caja y cuando cocina haga el último cierre, el servidor te envía el reporte con el resultado del día. Nadie del personal lo ve.</p>
+      <h3 class="sec">Telegram</h3>${telegram}
+      <h3 class="sec">Correo</h3>${correo}
+      ${tg.conectado || co.correo ? '<button type="button" class="btn" data-a="avisoProbar">Enviar mensaje de prueba</button>' : ''}
+    </div>`;
+  }
+  async function avisoAccion(el, body, msg) {
+    if (el) el.disabled = true;
+    try { const r = await LC.api('avisos', { method: 'POST', body }); if (r.telegram) avisosSrv = r; if (msg) LC.toast(typeof msg === 'function' ? msg(r) : msg); LC.render(); return r; }
+    catch (e) { if (el) el.disabled = false; LC.toast(e.message, 'error'); }
+  }
+  LC.A.avisoTelegramConectar = async (d, el) => {
+    const r = await avisoAccion(el, { accion: 'telegram-codigo' });
+    if (r && r.enlace) { enlaceTelegram = r.enlace; LC.render(); }
+  };
+  LC.A.avisoTelegramConfirmar = async (d, el) => {
+    const r = await avisoAccion(el, { accion: 'telegram-confirmar' }, 'Telegram conectado: te llegó un mensaje de bienvenida');
+    if (r) { enlaceTelegram = ''; LC.render(); }
+  };
+  LC.A.avisoTelegramQuitar = (d, el) => { if (confirm('¿Dejar de recibir los cierres por Telegram?')) avisoAccion(el, { accion: 'telegram-quitar' }, 'Telegram desconectado'); };
+  LC.A.avisoCorreo = (d, f) => avisoAccion(f.querySelector('button'), { accion: 'correo', correo: d.correo }, 'Correo guardado');
+  LC.A.avisoProbar = (d, el) => avisoAccion(el, { accion: 'probar' }, (r) => {
+    const p = r.prueba, t = { enviado: 'enviado ✅', error: 'falló ❌', 'no configurado': 'no configurado' };
+    return `Prueba: Telegram ${t[p.telegram] || p.telegram}, correo ${t[p.correo] || p.correo}`;
+  });
+
   LC.A.negocioGuardar = (d, f) => enServidor(f, async () => {
     await LC.api('catalogo/negocio', { method: 'PATCH', body: {
       nombre: d.negocio.trim(), whatsapp: d.whatsapp.replace(/\D/g, ''), mesas: parseInt(d.mesas, 10) || 0,
