@@ -366,7 +366,7 @@
     if (efe > 0 && rec > 0) h += rec >= efe ? `<p class="cambio">Cambio para el cliente <strong class="num">${LC.fmt(rec - efe)}</strong></p>` : '<p class="neg">El efectivo entregado es menor que el valor en efectivo</p>';
     document.getElementById('cobro-estado').innerHTML = h;
   };
-  LC.A.cobroConfirmar = (d) => {
+  LC.A.cobroConfirmar = async (d, f) => {
     const o = buscar(d.id);
     if (!o || o.estado !== 'abierta') return;
     const total = LC.totalOrden(o);
@@ -376,13 +376,21 @@
     const efe = pagos.find((x) => x.cuenta === 'Efectivo');
     const rec = Math.round(LC.num(d.recibido));
     if (efe && rec && rec < efe.monto) return LC.toast('El efectivo entregado es menor que el valor en efectivo', 'error');
+    // Primero el servidor: si el cobro no queda en el libro contable, la cuenta sigue abierta
+    const btn = f.querySelector('button.ok');
+    btn.disabled = true;
+    try {
+      await LC.accionTurno('venta', { pagos, concepto: `${LC.tituloOrden(o)}, orden #${pad3(o.numero)}` });
+    } catch (e) {
+      btn.disabled = false;
+      return LC.toast(e.message, 'error');
+    }
     o.pagos = pagos;
     o.recibido = efe ? rec || efe.monto : 0;
     o.cambio = efe ? Math.max(0, o.recibido - efe.monto) : 0;
     o.estado = 'pagada';
     o.cerradaEn = new Date().toISOString();
     o.cobradoPor = LC.user.nombre;
-    pagos.forEach((x) => LC.mov({ tipo: 'venta', cuenta: x.cuenta, monto: x.monto, concepto: `${LC.tituloOrden(o)}, orden #${pad3(o.numero)}`, categoria: 'Venta', ref: o.id }));
     LC.log('Cuenta cobrada', `${LC.tituloOrden(o)} ${LC.fmt(total)}: ${pagos.map((x) => `${x.cuenta} ${LC.fmt(x.monto)}`).join(', ')}`);
     LC.save();
     if (d.imprimir) LC.imprimir(ticketCuenta(o, 'RECIBO DE PAGO'));

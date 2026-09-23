@@ -134,8 +134,20 @@
     LC.go('reportes', { tab: 'movimientos', cuenta: f[0].value, tipo: f[1].value });
   };
 
+  // Auditoría del servidor (caja, usuarios, precios, stock) + lo que todavía registra este equipo (pedidos)
+  let audSrv = null, cargandoAud = false;
+  function cargarAuditoria() {
+    if (cargandoAud) return;
+    cargandoAud = true;
+    LC.api('auditoria').then((r) => {
+      audSrv = r.auditoria;
+      if (LC.state.view === 'reportes' && LC.state.params.tab === 'auditoria' && !LC.$('#modal-root').innerHTML) LC.render();
+    }).catch((e) => LC.toast(e.message, 'error')).finally(() => { cargandoAud = false; });
+  }
   function auditoria() {
-    const l = LC.db.auditoria.slice(-300).reverse();
+    if (!audSrv) { cargarAuditoria(); return '<p class="muted">Cargando auditoría…</p>'; }
+    const srv = audSrv; audSrv = null; // la próxima vez que se abra, se vuelve a pedir
+    const l = srv.concat(LC.db.auditoria.slice(-300)).sort((a, b) => (a.fecha < b.fecha ? 1 : -1)).slice(0, 400);
     return `<p class="muted">Todo lo que hace cada usuario queda aquí: anulaciones, cambios de precio, ajustes de stock y accesos.</p>
     <div class="card">${l.map((a) => `<div class="mov"><div><strong>${esc(a.accion)}</strong><small>${esc(a.detalle)}</small></div><small class="right">${LC.fecha(a.fecha)} ${LC.hora(a.fecha)}<br>${esc(a.usuario)}</small></div>`).join('')}</div>`;
   }

@@ -9,7 +9,7 @@
 'use strict';
 (function () {
   const LC = (window.LC = window.LC || {});
-  LC.VERSION = '2.2.0';
+  LC.VERSION = '2.3.0';
   LC.TENANT = 'loschamos'; // en fase 2 viene del login (multi-negocio)
   LC.KEY = 'lc2_' + LC.TENANT;
 
@@ -94,9 +94,8 @@
   LC.equipo = []; // personal activo del negocio, viene del servidor (para la apertura de caja)
 
   /* ---------------- catálogo (viene del servidor) ---------------- */
-  // Menú, pizzas, inventario y datos del negocio viven en el servidor y todos los equipos ven lo
-  // mismo. El STOCK todavía lo lleva cada equipo (cambia con aperturas, llegadas y cierres, que
-  // pasan al servidor en la parte 3): al recargar el catálogo se conserva el stock de este equipo.
+  // Menú, pizzas, inventario (con su stock) y datos del negocio viven en el servidor y todos los
+  // equipos ven lo mismo.
   LC.catalogoVacio = false;
   LC.cargarCatalogo = async () => {
     const c = await LC.api('catalogo');
@@ -108,10 +107,7 @@
     db.categorias = ['Pizzas'].concat(c.categorias, ['Bebidas']);
     db.productos = c.productos.map((p) => ({ id: p.id, categoria: p.categoria || 'Otros', nombre: p.nombre, precio: p.precio, activo: p.activo }));
     db.pizza.tipos = c.pizzas.map((t) => ({ id: t.id, nombre: t.nombre, gratis: t.gratis, precios: t.precios, extra: t.extra, sabores: t.sabores }));
-    Object.keys(LC.INV).forEach((g) => {
-      const local = Object.fromEntries(db[g].map((x) => [x.id, x]));
-      db[g] = c.inventario[g].map((x) => Object.assign({}, x, { stock: local[x.id] ? LC.num(local[x.id].stock) : LC.num(x.stock) }));
-    });
+    Object.keys(LC.INV).forEach((g) => (db[g] = c.inventario[g].map((x) => Object.assign({}, x, { stock: LC.num(x.stock) }))));
     LC.save();
     return true;
   };
@@ -256,22 +252,45 @@
 
   /* ---------------- reglas de negocio ---------------- */
   LC.can = (p) => !!LC.user && (LC.user.rol === 'admin' || (LC.user.permisos || []).includes(p));
-  LC.turno = () => LC.db.turnos.find((t) => t.id === LC.db.turnoActualId) || null;
+  // Turno sin terminar (viene del servidor). Tiene dos momentos:
+  //  - caja abierta: se vende y se mueve dinero  → LC.turno()
+  //  - caja cerrada por la encargada, esperando el inventario de cocina → solo LC.turnoCocina()
+  LC.turnoCocina = () => LC.db.turnos.find((t) => t.id === LC.db.turnoActualId && t.estado === 'abierto') || null;
+  LC.turno = () => { const t = LC.turnoCocina(); return t && !t.cajaCerrada ? t : null; };
+  LC.esperandoCocina = () => { const t = LC.turnoCocina(); return !!(t && t.cajaCerrada); };
 
   LC.log = (accion, detalle = '') => {
     LC.db.auditoria.push({ fecha: new Date().toISOString(), usuario: LC.user ? LC.user.nombre : 'sistema', accion, detalle });
     if (LC.db.auditoria.length > 5000) LC.db.auditoria.splice(0, 1000);
   };
 
-  // Libro contable: cada peso que entra o sale queda aquí y mueve el saldo de su cuenta
-  LC.mov = ({ tipo, cuenta, monto, concepto, categoria = '', ref = null }) => {
-    const m = {
-      id: LC.uid(), fecha: new Date().toISOString(), turnoId: LC.db.turnoActualId,
-      tipo, cuenta, monto: Math.round(monto), concepto, categoria, ref, usuario: LC.user ? LC.user.nombre : 'sistema'
-    };
-    LC.db.movimientos.push(m);
-    LC.db.saldos[cuenta] = (LC.db.saldos[cuenta] || 0) + m.monto;
-    return m;
+  /* ---------------- turno y caja (viven en el servidor) ---------------- */
+  // El libro contable, los saldos, el turno, las llegadas y el stock están en el servidor.
+  // Aquí solo se guarda una copia para mostrar las pantallas; cada cambio se hace con la API.
+  function aplicarEstado(e) {
+    const db = LC.db;
+    // Los números de orden y de comanda todavía los lleva el equipo de la caja (hasta la parte 4)
+    const antes = Object.fromEntries(db.turnos.map((t) => [t.id, t]));
+    e.turnos.forEach((t) => {
+      const a = antes[t.id];
+      if (a) { t.seqOrden = Math.max(t.seqOrden || 0, a.seqOrden || 0); t.seqComanda = Math.max(t.seqComanda || 0, a.seqComanda || 0); }
+    });
+    db.turnos = e.turnos;
+    db.turnoActualId = e.turnoActualId;
+    db.movimientos = e.movimientos;
+    db.entradas = e.entradas;
+    db.saldos = Object.assign(Object.fromEntries(LC.CUENTAS.map((c) => [c, 0])), e.saldos);
+    LC.save();
+  }
+  LC.cargarTurno = async () => aplicarEstado(await LC.api('turno'));
+
+  // Acciones que cambian el stock: después se recarga también el catálogo (que trae el stock)
+  const CAMBIAN_STOCK = ['abrir', 'llegada', 'ajuste', 'cerrar-caja', 'cerrar-cocina'];
+  LC.accionTurno = async (accion, body) => {
+    const e = await LC.api('turno/' + accion, { method: 'POST', body });
+    aplicarEstado(e);
+    if (CAMBIAN_STOCK.includes(accion)) { try { await LC.cargarCatalogo(); } catch (err) { console.warn(err); } }
+    return e;
   };
 
   LC.totalOrden = (o) => o.lineas.filter((l) => !l.anulada).reduce((a, l) => a + l.precio * l.qty, 0);

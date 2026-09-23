@@ -31,14 +31,19 @@
 
   LC.go = (view, params = {}) => {
     LC.state = { view, params }; LC.cerrarModal(); LC.render(); window.scrollTo(0, 0);
-    // Trae los cambios de menú y precios hechos desde otros equipos
-    if (LC.user && (view === 'pos' || view === 'ajustes')) {
-      LC.cargarCatalogo().then((ok) => {
-        const el = document.activeElement, escribiendo = el && el.closest('#main') && el.matches('input, select, textarea');
-        if (ok && LC.state.view === view && !$('#modal-root').innerHTML && !escribiendo) LC.render();
-      }).catch(() => {});
-    }
+    // Trae lo que cambiaron otros equipos: menú y precios, y el estado de la caja
+    if (!LC.user) return;
+    const tareas = [];
+    if (view === 'pos' || view === 'ajustes') tareas.push(LC.cargarCatalogo());
+    if (['inicio', 'pos', 'caja', 'cocina', 'reportes', 'apertura', 'cierre'].includes(view)) tareas.push(LC.cargarTurno());
+    if (tareas.length) Promise.all(tareas).then(() => refrescarSiSePuede(view)).catch(() => {});
   };
+  // Vuelve a dibujar con datos nuevos solo si nadie está escribiendo ni en un asistente
+  const ASISTENTES = ['apertura', 'cierre', 'cocinaCierre'];
+  function refrescarSiSePuede(view) {
+    const el = document.activeElement, escribiendo = el && el.closest('#main') && el.matches('input, select, textarea');
+    if (LC.state.view === view && !ASISTENTES.includes(view) && !$('#modal-root').innerHTML && !escribiendo) LC.render();
+  }
   LC.A.go = (d) => LC.go(d.v, Object.assign({}, d));
 
   LC.guard = (...perms) => perms.some(LC.can);
@@ -112,7 +117,7 @@
     const rol = (LC.ROLES[LC.user.rol] || {}).nombre || LC.user.rol;
     $('#top').innerHTML = `
       <div class="brand">${esc(LC.db.config.negocio)}</div>
-      <div class="turno-pill ${t ? 'on' : 'off'}">${t ? 'Caja abierta ' + LC.hora(t.abiertoEn) : 'Caja cerrada'}</div>
+      <div class="turno-pill ${t ? 'on' : 'off'}">${t ? 'Caja abierta ' + LC.hora(t.abiertoEn) : LC.esperandoCocina() ? 'Esperando cocina' : 'Caja cerrada'}</div>
       <div class="who"><span>${esc(LC.user.nombre)}<small>${esc(rol)}</small></span><button class="link" data-a="salir">Salir</button></div>`;
   }
   const NAV = [
@@ -161,6 +166,7 @@
     LC.negocio = r.negocio;
     await LC.cargarEquipo();
     try { await LC.cargarCatalogo(); } catch (e) { console.warn('No se pudo cargar el menú del servidor', e); }
+    try { await LC.cargarTurno(); } catch (e) { console.warn('No se pudo cargar el turno del servidor', e); }
   }
   LC.cargarEquipo = async () => {
     if (!LC.can('turno.operar')) return;
@@ -212,12 +218,16 @@
 
     return `
     <section class="hero-turno ${t ? 'abierto' : 'cerrado'}">
-      <p class="ht-estado">${t ? 'Caja abierta desde las ' + LC.hora(t.abiertoEn) : 'Caja cerrada'}</p>
+      <p class="ht-estado">${t ? 'Caja abierta desde las ' + LC.hora(t.abiertoEn) : LC.esperandoCocina() ? 'Caja cerrada · esperando el inventario de cocina' : 'Caja cerrada'}</p>
       ${t ? `<h1 class="num">${LC.fmt(r.ventas)}</h1>
         <p>Vendido en este turno: ${r.ordenesPagadas} cuentas cerradas, ${abiertas.length} abiertas, ${comandas} comandas en cocina.</p>`
         : `<h1>Hola, ${esc(LC.user.nombre.split(' ')[0])}</h1>
         <p>Para vender primero se abre la caja: personal del día, conteo de bebidas y utensilios, y arqueo de las cuentas.</p>
-        ${can('turno.operar') ? '<button class="btn primary lg" data-a="go" data-v="apertura">Abrir caja</button>' : '<p class="muted-inv">La encargada debe abrir la caja.</p>'}`}
+        ${LC.esperandoCocina()
+          ? `<p>Falta el inventario de cierre de cocina. Con ese último paso se calcula el resultado del día.</p>
+             ${can('cocina.inventario') ? '<button class="btn primary lg" data-a="go" data-v="cocinaCierre">Hacer inventario de cocina</button>' : ''}
+             ${can('turno.operar') ? '<button class="btn ghost" data-a="go" data-v="apertura">Opciones</button>' : ''}`
+          : can('turno.operar') ? '<button class="btn primary lg" data-a="go" data-v="apertura">Abrir caja</button>' : '<p class="muted-inv">La encargada debe abrir la caja.</p>'}`}
     </section>
     ${t && can('reportes.ver') ? `<div class="saldo-grid">${LC.CUENTAS.map((c) => `<div class="saldo"><span>${c}</span><strong class="num">${LC.fmt(LC.db.saldos[c])}</strong></div>`).join('')}</div>` : ''}
     <div class="quick">${acc.map(([v, t1, t2]) => `<button class="quick-i" data-a="go" data-v="${v}"><strong>${t1}</strong><span>${t2}</span></button>`).join('')}</div>`;
@@ -403,11 +413,12 @@
         <button class="btn primary block">Guardar ajuste</button>
       </form>`);
   };
-  LC.A.invAjusteGuardar = (d) => {
-    const it = LC.db[d.tipo].find((x) => x.id === d.id); if (!it) return;
-    const antes = it.stock; it.stock = LC.num(d.stock);
-    LC.log('Ajuste de stock', `${it.nombre}: ${LC.q(antes)} a ${LC.q(it.stock)}. Motivo: ${d.motivo}`);
-    LC.save(); LC.cerrarModal(); LC.toast('Ajuste registrado'); LC.render();
+  LC.A.invAjusteGuardar = async (d, f) => {
+    const btn = f.querySelector('button.primary');
+    btn.disabled = true;
+    try { await LC.accionTurno('ajuste', { itemId: d.id, stock: LC.num(d.stock), motivo: d.motivo.trim() }); }
+    catch (e) { btn.disabled = false; return LC.toast(e.message, 'error'); }
+    LC.cerrarModal(); LC.toast('Ajuste registrado'); LC.render();
   };
 
   function tabNegocio() {
@@ -572,8 +583,11 @@
       if (!LC.user) return LC.render();
       if (!$('#modal-root').innerHTML && !escribiendo()) LC.render();
     });
+    // Cada 30 segundos: trae el estado de la caja (así la mesera ve cuando se abre o se cierra)
     setInterval(() => {
-      if (LC.user && ['cocina', 'pos'].includes(LC.state.view) && !$('#modal-root').innerHTML) LC.render();
+      if (!LC.user || document.hidden) return;
+      const view = LC.state.view;
+      LC.cargarTurno().then(() => { if (['inicio', 'cocina', 'pos', 'caja'].includes(view)) refrescarSiSePuede(view); }).catch(() => {});
     }, 30000);
   };
 })();

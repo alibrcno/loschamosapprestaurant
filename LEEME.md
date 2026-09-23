@@ -31,11 +31,11 @@ Los datos de la versión anterior (bebidas, utensilios, insumos) se importan sol
 
 **Pedidos (mesera / encargada).** Mesa → productos por categoría → pizzas con tamaño y sabores (el precio se calcula solo) → **Enviar a cocina** (solo imprime lo nuevo, con número de comanda y hora) → el cliente puede pedir más → **Pre-cuenta** → **Cobrar** con uno o varios medios de pago; en efectivo escribes lo que entrega y muestra el cambio → la mesa queda libre.
 
-**Cocina.** Pantalla de comandas (pendiente → listo → entregado, con alerta por tiempo). Registra lo que llega en peso o cantidad. Al final hace el inventario de cierre: la app calcula lo gastado (abrió + llegó − queda), su costo y la lista de compras, y la envía por WhatsApp.
+**Cocina.** Pantalla de comandas (pendiente → listo → entregado, con alerta por tiempo). Registra lo que llega en peso o cantidad. **Cocina cierra de último:** después de que la encargada cierra la caja, hace el inventario de cierre; la app calcula lo gastado (abrió + llegó − queda), su costo y la lista de compras, y la envía por WhatsApp. Con ese último paso termina el turno y se calcula el resultado del día (queda en Reportes → Turnos).
 
 **Caja durante el turno.** Gastos e ingresos siempre indicando de qué cuenta salió o a cuál entró. "Llegó mercancía" sube el stock, actualiza el costo y, si se pagó, registra el gasto. Traslados entre cuentas (ej. consignar efectivo).
 
-**Cierre (encargada).** No deja cerrar con cuentas abiertas. Conteo de bebidas y utensilios → arqueo → resumen: ventas por medio de pago, lo que debería haber vs. lo contado, bebidas vendidas por conteo vs. registradas en el POS (⚠️ si no coinciden), utilidad estimada y lista de compras. Si hay diferencias exige observación. Envía todo por WhatsApp.
+**Cierre de caja (encargada).** No deja cerrar con cuentas abiertas. Conteo de bebidas y utensilios → arqueo → resumen: ventas por medio de pago, lo que debería haber vs. lo contado, bebidas vendidas por conteo vs. registradas en el POS (⚠️ si no coinciden) y lista de compras. Si hay diferencias exige observación. Envía el cierre de caja por WhatsApp; el resultado del día (utilidad) sale cuando cocina haga su inventario. Si cocina no lo hace, la encargada puede terminar el turno "sin inventario de cocina" explicando por qué.
 
 ## Cómo evita fugas
 
