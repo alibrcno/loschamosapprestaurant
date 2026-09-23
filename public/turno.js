@@ -266,6 +266,7 @@
     </div>
     ${cierre ? `<div class="notice ok">Inventario de cierre hecho a las ${LC.hora(cierre.en)} por ${esc(cierre.por)}.</div>` : ''}
     <h3 class="sec">Insumos en este turno</h3>
+    <p class="muted">"Al abrir" es lo que contó cocina en el cierre del turno anterior.</p>
     <table class="tbl"><thead><tr><th>Insumo</th><th>Al abrir</th><th>Llegó</th><th>Debería haber</th></tr></thead><tbody>
     ${LC.db.insumos.map((i) => { const ini = LC.num(t.apertura.insumos[i.id]), e = LC.num(ent[i.id]); return `<tr><td>${esc(i.nombre)} <small>${esc(i.unidad)}</small></td><td>${LC.q(ini)}</td><td>${e ? '+' + LC.q(e) : ''}</td><td><strong>${LC.q(ini + e)}</strong></td></tr>`; }).join('')}
     </tbody></table>

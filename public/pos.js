@@ -434,11 +434,15 @@
     const tabs = [];
     if (LC.can('cocina.comandas')) tabs.push(['comandas', 'Comandas']);
     if (LC.can('cocina.inventario')) tabs.push(['inventario', 'Inventario']);
-    const tab = tabs.some((x) => x[0] === p.tab) ? p.tab : tabs[0][0];
+    // Con la caja ya cerrada, lo que le falta a cocina es su inventario de cierre: se abre esa pestaña
+    const pendiente = LC.esperandoCocina() && LC.can('cocina.inventario');
+    const tab = tabs.some((x) => x[0] === p.tab) ? p.tab : pendiente ? 'inventario' : tabs[0][0];
     return `<div class="page-head"><h1>Cocina</h1></div>${tabs.length > 1 ? LC.tabs(tabs, tab, 'cocina') : ''}${tab === 'comandas' ? kdsHTML() : LC.cocinaInvHTML()}`;
   };
   function kdsHTML() {
     const t = LC.turno();
+    if (!t && LC.esperandoCocina()) return `<div class="empty"><h2>La caja ya se cerró</h2><p>No hay más comandas en este turno. Falta el inventario de cierre de cocina.</p>
+      ${LC.can('cocina.inventario') ? '<button class="btn primary lg" data-a="go" data-v="cocinaCierre">Hacer inventario de cierre</button>' : ''}</div>`;
     if (!t) return '<div class="empty"><h2>La caja está cerrada</h2></div>';
     const items = [];
     LC.db.ordenes.forEach((o) => {
