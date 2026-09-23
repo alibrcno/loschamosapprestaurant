@@ -417,7 +417,8 @@
         <h3 class="sec">Bebidas</h3>
         <table class="tbl"><thead><tr><th>Bebida</th><th>Abrió</th><th>Llegó</th><th>Queda</th><th>Vendidas</th><th>En POS</th><th>Valor</th></tr></thead><tbody>
         ${r.bebidas.map((b) => `<tr><td>${esc(b.nombre)}</td><td>${LC.q(b.ini)}</td><td>${b.ent ? '+' + LC.q(b.ent) : ''}</td><td>${LC.q(b.fin)}</td><td>${LC.q(b.consumo)}</td><td class="${b.dif ? 'neg' : ''}">${LC.q(b.pos)}</td><td>${LC.fmt(b.valor)}</td></tr>`).join('')}
-        </tbody><tfoot><tr><td colspan="6">Venta de bebidas según conteo</td><td><strong>${LC.fmt(r.ventaBebidasConteo)}</strong></td></tr></tfoot></table>
+        </tbody><tfoot><tr><td colspan="6">Venta de bebidas según conteo (${LC.q(r.bebidasVendidas)} und)</td><td><strong>${LC.fmt(r.ventaBebidasConteo)}</strong></td></tr></tfoot></table>
+        ${r.apartarBebidas ? `<div class="notice">Aparta <strong>${LC.fmt(r.apartarBebidas)}</strong> para reponer las bebidas que se vendieron (lo que costaron).</div>` : ''}
         ${hayDifB ? '<div class="notice bad">Hay bebidas que salieron del inventario y no se registraron en el POS (o al revés). Revisa antes de cerrar.</div>' : ''}
         ${r.cocinaCerrada ? '' : '<div class="notice">Cocina aún no hace su inventario de cierre. El costo de insumos no entra en la utilidad de hoy.</div>'}
         <h3 class="sec">Compras sugeridas para mañana</h3>

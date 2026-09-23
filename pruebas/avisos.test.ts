@@ -134,6 +134,12 @@ describe('Avisos del cierre por Telegram y correo', () => {
     assert.match(tg2, /RESULTADO DEL DÍA · CHAMOS E/);
     assert.match(tg2, /UTILIDAD ESTIMADA: -\$7\.200/);
     assert.match(tg2, /inventario de cocina Cocina E/);
+    // Bebidas vendidas y lo que hay que apartar (2 Coca-Cola × $2.600); inventario y dinero al cierre
+    assert.match(tg2, /BEBIDAS VENDIDAS: 2 und por \$8\.000/);
+    assert.match(tg2, /Aparta \$5\.200 para reponer/);
+    assert.match(tg2, /• Bebidas: \$20\.800\n• Utensilios: \$0\n• Cocina: \$30\.000\n• Almacén: \$0/, '8 Coca-Cola × $2.600 y 1,5 kg de queso × $20.000');
+    assert.match(tg2, /Total en mercancía: \$50\.800\nTotal en dinero: \$8\.000/);
+    assert.match(tg2, /Quedó en caja y cuentas: \$8\.000/);
     assert.match(tg2, /SEMANA \(desde el martes \d\d\/\d\d\): 1 turnos, ventas \$8\.000/, 'el reporte final trae cómo va la semana');
     assert.match(recibidos.find((x) => x.canal === 'correo')!.datos.subject, /^Resultado del día · Chamos E/);
   });

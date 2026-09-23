@@ -166,6 +166,9 @@
       if (l.borrador && LC.can('pos.tomar')) {
         acc = `<div class="qty"><button class="icon-btn sm" data-a="lineaMenos" data-l="${l.lid}" aria-label="Quitar uno">−</button><span>${l.qty}</span><button class="icon-btn sm" data-a="lineaMas" data-l="${l.lid}" aria-label="Agregar uno">+</button></div>
           <button class="link" data-a="lineaNota" data-l="${l.lid}">${l.obs ? 'Editar nota' : 'Nota'}</button>`;
+        // Extras opcionales de la categoría, marcados ahí mismo
+        const ex = l.tipo === 'producto' ? extrasDe(l.categoria) : [];
+        if (ex.length) badge += `<span class="extras-linea">${ex.map((e, i) => `<button class="chip sm${(l.extras || []).includes(e.nombre) ? ' on' : ''}" data-a="lineaExtra" data-l="${l.lid}" data-i="${i}">${(l.extras || []).includes(e.nombre) ? '✓' : '+'} ${esc(e.nombre)} ${LC.fmt(e.precio)}</button>`).join('')}</span>`;
       } else if (quitable(o, l) && LC.can('pos.tomar')) {
         acc = `<button class="link" data-a="lineaQuitar" data-l="${l.lid}">Quitar uno</button>`;
       } else if (!l.anulada && !l.borrador && LC.can('pos.anular')) {
@@ -194,39 +197,26 @@
   const linea = (lid) => { const o = actual(); return o && o.lineas.find((l) => l.lid === lid); };
 
   LC.A.posCat = (d) => { P.cat = d.c; LC.render(); };
+  // Extras de la categoría (queso extra, tocineta…): el producto se agrega de una vez y los extras se marcan
+  // en la misma línea de la cuenta, solo si el cliente los pide. No abre ninguna pantalla.
   const extrasDe = (cat) => (LC.db.extras || {})[cat] || [];
   LC.A.addProd = (d) => {
     const o = actual(), x = LC.db.productos.find((p) => p.id === d.id);
-    if (!o || !x) return;
-    const ex = extrasDe(x.categoria);
-    if (!ex.length) return agregar(o, { tipo: 'producto', pid: x.id, nombre: x.nombre, categoria: x.categoria, precio: x.precio });
-    // La categoría tiene extras: se eligen antes de agregar
-    LC.modal(`${LC.modalHead(x.nombre)}
-      <form class="form extras-form" data-submit="prodExtrasAgregar" data-ch="prodExtrasCalc">
-        <input type="hidden" name="id" value="${x.id}">
-        <fieldset><legend>Extras (opcional)</legend>
-          <div class="checks">${ex.map((e, i) => `<label class="check"><input type="checkbox" name="ex" value="${i}"><span>${esc(e.nombre)} <small>+${LC.fmt(e.precio)}</small></span></label>`).join('')}</div></fieldset>
-        <div class="grid2"><label>Cantidad<input type="number" name="qty" value="1" min="1" step="1"></label>
-        <label>Observaciones<input name="obs" placeholder="Ej. sin cebolla"></label></div>
-        <div class="pizza-total"><span>Valor</span><strong id="ex-total" class="num">${LC.fmt(x.precio)}</strong></div>
-        <button class="btn primary lg block">Agregar a la cuenta</button>
-      </form>`, true);
+    if (o && x) agregar(o, { tipo: 'producto', pid: x.id, nombre: x.nombre, categoria: x.categoria, precio: x.precio, base: x.precio, extras: [] });
   };
-  const extrasElegidos = (f) => {
-    const x = LC.db.productos.find((p) => p.id === f.elements.id.value), ex = extrasDe(x.categoria);
-    const sel = Array.from(f.querySelectorAll('input[name=ex]:checked')).map((i) => ex[+i.value]);
-    return { x, sel, unit: x.precio + sel.reduce((a, e) => a + e.precio, 0), qty: Math.max(1, parseInt(f.elements.qty.value, 10) || 1) };
-  };
-  LC.A.prodExtrasCalc = (d, f) => { const r = extrasElegidos(f); document.getElementById('ex-total').textContent = LC.fmt(r.unit * r.qty); };
-  LC.A.prodExtrasAgregar = (d, f) => {
-    const o = actual(); if (!o) return;
-    const r = extrasElegidos(f);
-    LC.cerrarModal();
-    agregar(o, {
-      tipo: 'producto', pid: r.x.id, nombre: r.x.nombre, categoria: r.x.categoria, precio: r.unit, qty: r.qty, obs: (d.obs || '').trim(),
-      extras: r.sel.map((e) => e.nombre), detalle: r.sel.length ? 'Con ' + r.sel.map((e) => e.nombre).join(', ') : ''
-    });
-  };
+  LC.A.lineaExtra = (d) => enBorrador(d.l, (l, b) => {
+    const e = extrasDe(l.categoria)[+d.i]; if (!e) return;
+    // Si la línea tiene varias unidades, el extra es para UNA: se separa en su propia línea
+    let x = l;
+    if (l.qty > 1) { l.qty--; x = Object.assign({}, l, { lid: LC.uid(), qty: 1, extras: (l.extras || []).slice(), en: new Date().toISOString() }); b.lineas.splice(b.lineas.indexOf(l) + 1, 0, x); }
+    const ex = x.extras || (x.extras = []);
+    const k = ex.indexOf(e.nombre);
+    if (k >= 0) ex.splice(k, 1); else ex.push(e.nombre);
+    const base = x.base != null ? x.base : x.precio;
+    const elegidos = extrasDe(x.categoria).filter((y) => ex.includes(y.nombre));
+    x.base = base; x.precio = base + elegidos.reduce((a, y) => a + y.precio, 0);
+    x.detalle = elegidos.length ? 'Con ' + elegidos.map((y) => y.nombre).join(', ') : '';
+  });
   LC.A.addBebida = (d) => {
     const o = actual(), b = LC.db.bebidas.find((x) => x.id === d.id);
     if (o && b) agregar(o, { tipo: 'bebida', bebidaId: b.id, nombre: b.nombre, categoria: 'Bebidas', precio: LC.num(b.precio), sinCocina: true });

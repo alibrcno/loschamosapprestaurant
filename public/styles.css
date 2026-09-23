@@ -118,6 +118,8 @@ legend { font-size: .88rem; font-weight: 600; color: var(--ink-2); margin-bottom
 .inline-label input { width: auto; }
 .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .tabla-scroll { overflow-x: auto; }
+.extras-linea { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chip.sm { padding: 2px 8px; min-height: 28px; font-size: .78rem; }
 .fila-llegada, .fila-material { border-bottom: 1px dashed var(--line, #ddd); padding-bottom: 6px; margin-bottom: 6px; }
 
 /* ---------- pasos del asistente ---------- */

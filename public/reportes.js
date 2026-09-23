@@ -76,7 +76,14 @@
         <tr><td>Gastos operativos</td><td>${LC.fmt(r.gastosOp)}</td></tr>
         <tr><td>Compras de inventario pagadas</td><td>${LC.fmt(r.compras)}</td></tr>
         <tr><td>Anulaciones</td><td>${r.anulaciones}</td></tr>
+        ${r.bebidasVendidas != null ? `<tr><td>Bebidas vendidas: ${LC.q(r.bebidasVendidas)} und por ${LC.fmt(r.ventaBebidasConteo)}</td><td>Apartar ${LC.fmt(r.apartarBebidas)}</td></tr>` : ''}
       </tbody></table>
+      ${r.inventarioCierre ? `<h3 class="sec">Quedó al cierre</h3><table class="tbl"><tbody>
+        <tr><td>Dinero en caja y cuentas</td><td class="num">${r.dineroCierre != null ? LC.fmt(r.dineroCierre) : ''}</td></tr>
+        <tr><td>Bebidas (a costo)</td><td class="num">${LC.fmt(r.inventarioCierre.bebidas)}</td></tr>
+        <tr><td>Utensilios (a costo)</td><td class="num">${LC.fmt(r.inventarioCierre.utensilios)}</td></tr>
+        <tr><td>Cocina (a costo)</td><td class="num">${r.inventarioCierre.cocina != null ? LC.fmt(r.inventarioCierre.cocina) : 'sin inventario'}</td></tr>
+      </tbody></table><p class="muted">El avalúo del almacén está en 📦 Almacén.</p>` : ''}
       ${r.productos.length ? `<h3 class="sec">Lo más vendido</h3><table class="tbl"><tbody>${r.productos.slice(0, 10).map((x) => `<tr><td>${esc(x.nombre)}</td><td>${LC.q(x.qty)}</td><td>${LC.fmt(x.valor)}</td></tr>`).join('')}</tbody></table>` : ''}
       ${ci.obs ? `<p class="notice">Caja: ${esc(ci.obs)}</p>` : ''}
       ${t.cocina && t.cocina.cierre && t.cocina.cierre.obs ? `<p class="notice">Cocina: ${esc(t.cocina.cierre.obs)}</p>` : ''}

@@ -65,8 +65,9 @@ export function textoReporte(negocio: string, t: any, abrio: string, final: bool
   cuentas.forEach((c) => L.push(`• ${c}: ${fmt((r.ventasCuenta || {})[c] || 0)}`));
   const cats = Object.entries((r.porCategoria || {}) as Record<string, number>).sort((a, b) => b[1] - a[1]);
   if (cats.length) { L.push('', '🍕 Por categoría'); cats.forEach(([c, v]) => L.push(`• ${c}: ${fmt(v)}`)); }
-  L.push('', `🥤 BEBIDAS SEGÚN CONTEO: ${fmt(r.ventaBebidasConteo)}`);
+  L.push('', `🥤 BEBIDAS VENDIDAS: ${q(r.bebidasVendidas || 0)} und por ${fmt(r.ventaBebidasConteo)}`);
   r.bebidas.filter((b: any) => b.consumo).forEach((b: any) => L.push(`• ${b.nombre}: ${q(b.consumo)} (${fmt(b.valor)})${b.dif ? ` ⚠️ POS registró ${q(b.pos)}` : ''}`));
+  if (r.apartarBebidas) L.push(`💡 Aparta ${fmt(r.apartarBebidas)} para reponer esas bebidas (lo que costaron)`);
   L.push('', `🧾 GASTOS: ${fmt(r.gastos)}`);
   r.gastosLista.forEach((g: any) => L.push(`• ${g.concepto}: ${fmt(g.valor)} (${g.cuenta})`));
   if (ci.saldosContados) {
@@ -75,6 +76,7 @@ export function textoReporte(negocio: string, t: any, abrio: string, final: bool
       const dif = (ci.descuadre || {})[c] || 0;
       L.push(`• ${c}: ${fmt(ci.saldosContados[c])} ${dif ? `⚠️ ${dif > 0 ? 'sobran' : 'faltan'} ${fmt(Math.abs(dif))}` : '✅'}`);
     });
+    L.push(`💵 Quedó en caja y cuentas: ${fmt(cuentas.reduce((a, c) => a + (ci.saldosContados[c] || 0), 0))}`);
   }
   L.push('', '📊 RESULTADO');
   if (!final) {
@@ -94,10 +96,15 @@ export function textoReporte(negocio: string, t: any, abrio: string, final: bool
       ? `• ${q(x.comprar)} ${x.unidad} de ${x.nombre}: en el almacén hay ${q(x.almacen)}, saca ${q(x.sacar)}${x.comprar - x.sacar > 0 ? ` y compra ${q(Math.round((x.comprar - x.sacar) * 1000) / 1000)}` : ' (no hay que comprar)'}`
       : `• ${q(x.comprar)} ${x.unidad} de ${x.nombre}`));
     else L.push('✅ Todo sobre el stock sugerido');
-    if (extra.almacen) {
-      L.push('', `📦 ALMACÉN: avalúo ${fmt(extra.almacen.total)}`);
-      extra.almacen.bajos.forEach((x) => L.push(`• ⚠️ ${x.nombre}: quedan ${q(x.cantidad)} ${x.unidad} (mínimo ${q(x.minimo)})`));
-    }
+    // Lo que quedó inventariado al cierre, a precio de costo
+    const ic = r.inventarioCierre || {};
+    const alm = extra.almacen ? extra.almacen.total : 0;
+    L.push('', '📦 INVENTARIO AL CIERRE (a precio de costo)');
+    L.push(`• Bebidas: ${fmt(ic.bebidas || 0)}`, `• Utensilios: ${fmt(ic.utensilios || 0)}`,
+      `• Cocina: ${ic.cocina === null || ic.cocina === undefined ? 'sin inventario de cocina' : fmt(ic.cocina)}`, `• Almacén: ${fmt(alm)}`);
+    L.push(`Total en mercancía: ${fmt((ic.bebidas || 0) + (ic.utensilios || 0) + (ic.cocina || 0) + alm)}`);
+    if (r.dineroCierre !== null && r.dineroCierre !== undefined) L.push(`Total en dinero: ${fmt(r.dineroCierre)}`);
+    if (extra.almacen) extra.almacen.bajos.forEach((x) => L.push(`• ⚠️ Almacén: ${x.nombre} quedan ${q(x.cantidad)} ${x.unidad} (mínimo ${q(x.minimo)})`));
     if (extra.semana) L.push('', `📅 SEMANA (desde el martes ${extra.semana.desde}): ${extra.semana.turnos} turnos, ventas ${fmt(extra.semana.ventas)}, utilidad ${fmt(extra.semana.utilidad)}`);
   }
   L.push('', `👥 ${r.personal.map((p: any) => `${p.nombre} (${p.area})`).join(', ')}`);
@@ -177,7 +184,7 @@ export async function avisarCierre(tenantId: string, turnoId: string, final: boo
       const extra: Extra = {};
       if (final) {
         const a = await avaluoAlmacen(db);
-        if (a.total || a.bajos.length) extra.almacen = { total: a.total, bajos: a.bajos };
+        extra.almacen = { total: a.total, bajos: a.bajos };
         // La semana del negocio va de martes a lunes (el lunes se cierra la semana)
         const s = (await db.query(
           `WITH d AS (SELECT $1::date - ((extract(isodow FROM $1::date)::int + 5) % 7) AS martes)

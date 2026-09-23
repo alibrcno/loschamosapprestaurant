@@ -156,9 +156,14 @@ describe('API: turno y caja', () => {
   });
 
   test('Al día siguiente cocina abre primero (desde las 2 p. m.) y la encargada abre la caja después', async () => {
-    process.env.HORA_APERTURA_COCINA = '23';
-    const temprano = await llamar('turno/abrir-cocina', 'POST', {}, cocina);
-    if (new Date().getUTCHours() !== 4) assert.match(temprano.datos.error || '', /desde las 11 p. m./, 'antes de la hora no abre');
+    // Antes de la hora mínima no abre (se prueba con la hora siguiente a la actual de Colombia)
+    const horaCol = (new Date().getUTCHours() + 19) % 24;
+    if (horaCol < 23) {
+      process.env.HORA_APERTURA_COCINA = String(horaCol + 1);
+      const temprano = await llamar('turno/abrir-cocina', 'POST', {}, cocina);
+      assert.equal(temprano.status, 409, 'antes de la hora no abre');
+      assert.match(temprano.datos.error, /La cocina se puede abrir desde las/);
+    }
     process.env.HORA_APERTURA_COCINA = '0';
     assert.equal((await llamar('turno/abrir-cocina', 'POST', {}, mesera)).status, 403, 'la mesera no abre cocina');
     const r = await llamar('turno/abrir-cocina', 'POST', {}, cocina);

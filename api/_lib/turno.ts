@@ -149,7 +149,8 @@ export async function calcularResumen(db: PoolClient, t: Turno) {
       const consumo = fin === null ? null : ini + e - fin;
       const row: any = {
         id: it.id, nombre: it.nombre, unidad: it.unidad, ini, ent: e, fin, consumo,
-        costo: consumo === null ? 0 : Math.max(0, consumo) * num(it.costo),
+        costo: consumo === null ? 0 : Math.max(0, consumo) * num(it.costo), costoUnit: num(it.costo),
+        valorQueda: fin === null ? 0 : Math.round(Math.max(0, fin) * num(it.costo)),
         sugerido: num(it.sugerido), preparacion: prep[it.id] || 0,
         comprar: fin === null ? null : Math.round(Math.max(0, num(it.sugerido) + (prep[it.id] || 0) - fin) * 1000) / 1000
       };
@@ -176,6 +177,11 @@ export async function calcularResumen(db: PoolClient, t: Turno) {
     ordenesPagadas, ticketProm: ordenesPagadas ? ventas / ordenesPagadas : 0,
     porCategoria: pos.porCategoria || {}, productos: pos.productos || [], anulaciones: num(pos.anulaciones),
     bebidas, utensilios, insumos, ventaBebidasConteo: sum(bebidas, 'valor'),
+    // Bebidas que salieron (según el conteo) y lo que hay que apartar para reponerlas (su costo)
+    bebidasVendidas: Math.round(bebidas.reduce((a: number, r: any) => a + Math.max(0, r.consumo || 0), 0) * 1000) / 1000, apartarBebidas: Math.round(costoBebidas),
+    // Lo que quedó al cierre, a precio de costo
+    inventarioCierre: { bebidas: sum(bebidas, 'valorQueda'), utensilios: sum(utensilios, 'valorQueda'), cocina: co ? sum(insumos, 'valorQueda') : null },
+    dineroCierre: ci && ci.saldosContados ? Object.values(ci.saldosContados as Record<string, number>).reduce((a, x) => a + num(x), 0) : null,
     costoBebidas, costoUtensilios, costoInsumos, costoConsumo, cocinaCerrada: !!co,
     utilidad: ventas - costoConsumo - gastosOp, flujo: ventas + ingresos - gastos,
     descuadre: (ci && ci.descuadre) || null, personal, preparar

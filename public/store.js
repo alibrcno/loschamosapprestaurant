@@ -9,7 +9,7 @@
 'use strict';
 (function () {
   const LC = (window.LC = window.LC || {});
-  LC.VERSION = '2.6.0';
+  LC.VERSION = '2.6.1';
   LC.TENANT = 'loschamos'; // en fase 2 viene del login (multi-negocio)
   LC.KEY = 'lc2_' + LC.TENANT;
 
@@ -471,6 +471,7 @@
         const consumo = fin === null ? null : ini + e - fin;
         const row = {
           id: it.id, nombre: it.nombre, unidad: it.unidad, ini, ent: e, fin, consumo,
+          valorQueda: fin === null ? 0 : Math.round(Math.max(0, fin) * LC.num(it.costo)),
           costo: consumo === null ? 0 : Math.max(0, consumo) * LC.num(it.costo),
           sugerido: LC.num(it.sugerido), preparacion: prep[it.id] || 0,
           comprar: fin === null ? null : Math.round(Math.max(0, LC.num(it.sugerido) + (prep[it.id] || 0) - fin) * 1000) / 1000
@@ -495,6 +496,9 @@
       ordenesPagadas: ords.length, ticketProm: ords.length ? ventas / ords.length : 0,
       porCategoria, productos: Object.values(productos).sort((a, b) => b.valor - a.valor), anulaciones,
       bebidas, utensilios, insumos, ventaBebidasConteo: sum(bebidas, 'valor'),
+      bebidasVendidas: Math.round(bebidas.reduce((a, r) => a + Math.max(0, r.consumo || 0), 0) * 1000) / 1000, apartarBebidas: Math.round(sum(bebidas, 'costo')),
+      inventarioCierre: { bebidas: sum(bebidas, 'valorQueda'), utensilios: sum(utensilios, 'valorQueda'), cocina: co ? sum(insumos, 'valorQueda') : null },
+      dineroCierre: ci && ci.saldosContados ? LC.CUENTAS.reduce((a, c) => a + LC.num(ci.saldosContados[c]), 0) : null,
       costoBebidas, costoUtensilios, costoInsumos, costoConsumo, cocinaCerrada: !!co,
       utilidad: ventas - costoConsumo - gastosOp, flujo: ventas + ingresos - gastos,
       descuadre: (ci && ci.descuadre) || null, personal: t.personal || [], preparar
