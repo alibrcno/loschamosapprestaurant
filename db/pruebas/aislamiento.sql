@@ -132,6 +132,14 @@ INSERT INTO payments (tenant_id, order_id, account_id, monto, ledger_id) SELECT 
 UPDATE orders SET estado = 'pagada', cerrado_en = now();
 SELECT pg_temp.ok((SELECT sum(saldo) FROM account_balances) = 162000, 'Saldos: $100.000 de base + $62.000 de la venta');
 SELECT pg_temp.ok((SELECT saldo FROM account_balances WHERE nombre = 'Nequi') = 31000, 'Nequi recibió $31.000');
+-- Cola de impresión: se agrega y se marca impreso; el contenido no se cambia ni se borra
+INSERT INTO print_jobs (tenant_id, shift_id, order_id, tipo, titulo, datos) SELECT current_tenant(), shift_id, id, 'recibo', 'Recibo', '{}' FROM orders;
+UPDATE print_jobs SET impreso_en = now(), impreso_por = (SELECT id FROM users LIMIT 1);
+SELECT pg_temp.ok((SELECT count(*) FROM print_jobs WHERE impreso_en IS NOT NULL) = 1, 'El PC de caja marca la impresión como hecha');
+SELECT pg_temp.debe_fallar($$UPDATE print_jobs SET datos = '{"total": 1}'$$, 'Nadie cambia lo que se mandó a imprimir');
+SELECT pg_temp.debe_fallar($$DELETE FROM print_jobs$$, 'La cola de impresión no se borra');
+SELECT set_config('app.tenant_id', :'tb', true) \gset
+SELECT pg_temp.ok((SELECT count(*) FROM print_jobs) = 0, 'Chamos B no ve las impresiones de Chamos A');
 ROLLBACK;
 
 \echo ''

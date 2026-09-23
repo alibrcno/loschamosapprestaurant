@@ -36,6 +36,7 @@
     const tareas = [];
     if (view === 'pos' || view === 'ajustes') tareas.push(LC.cargarCatalogo());
     if (['inicio', 'pos', 'caja', 'cocina', 'reportes', 'apertura', 'cierre'].includes(view)) tareas.push(LC.cargarTurno());
+    if (['inicio', 'pos', 'orden', 'caja', 'cocina', 'reportes', 'cierre'].includes(view)) tareas.push(LC.cargarPedidos());
     if (tareas.length) Promise.all(tareas).then(() => refrescarSiSePuede(view)).catch(() => {});
   };
   // Vuelve a dibujar con datos nuevos solo si nadie está escribiendo ni en un asistente
@@ -74,7 +75,45 @@
       .ind { padding-left: 10px; }
     </style></head><body>${html}</body></html>`);
     doc.close();
-    setTimeout(() => { fr.contentWindow.focus(); fr.contentWindow.print(); }, 250);
+    // Devuelve una promesa: el PC de caja espera a que salga un ticket antes de mandar el siguiente
+    return new Promise((ok) => setTimeout(() => { fr.contentWindow.focus(); fr.contentWindow.print(); setTimeout(ok, 800); }, 250));
+  };
+
+  /* ---------------- estación de impresión (el PC de caja, que tiene la impresora) ---------------- */
+  // Las comandas, pre-cuentas y recibos que piden las meseras desde su celular quedan en una cola
+  // en el servidor. El equipo marcado como estación revisa la cola cada pocos segundos y los imprime.
+  const EST = 'lc2_estacion';
+  LC.estacionActiva = () => { try { return localStorage.getItem(EST) === '1' && LC.can('pos.cobrar'); } catch (e) { return false; } };
+  LC.A.estacionCambiar = (d, el) => {
+    try { localStorage.setItem(EST, el.checked ? '1' : '0'); } catch (e) { return LC.toast('Este navegador no deja guardar la opción', 'error'); }
+    LC.toast(el.checked ? 'Este equipo imprime lo que manden las meseras' : 'Este equipo ya no imprime automáticamente');
+    if (el.checked) LC.revisarImpresion();
+  };
+  let imprimiendo = false;
+  LC.revisarImpresion = async () => {
+    if (imprimiendo || !LC.user || !LC.estacionActiva() || !LC.ticketDe) return;
+    imprimiendo = true;
+    try {
+      const r = await LC.api('impresion', { method: 'POST', body: { accion: 'tomar' } });
+      for (const j of r.trabajos) await LC.imprimir(LC.ticketDe(j));
+    } catch (e) { console.warn('No se pudo revisar la cola de impresión', e); }
+    finally { imprimiendo = false; }
+  };
+  LC.A.impresionesVer = async () => {
+    let r;
+    try { r = await LC.api('impresion'); } catch (e) { return LC.toast(e.message, 'error'); }
+    LC.modal(`${LC.modalHead('Impresiones del turno')}
+      <p class="muted">Lo último que se mandó a imprimir. Si un papel no salió o se dañó, sácalo otra vez.</p>
+      <div class="list">${r.trabajos.map((j) => `<div class="list-item"><div><strong>${esc(j.titulo)}</strong><small>${LC.hora(j.creadoEn)}, pidió ${esc(j.pidio || '')}${j.impresoEn ? '' : ', en espera'}</small></div>
+        <button class="btn sm" data-a="reimprimir" data-id="${j.id}">Imprimir</button></div>`).join('') || '<p class="empty">Todavía no se ha impreso nada en este turno.</p>'}</div>`);
+  };
+  LC.A.reimprimir = async (d, el) => {
+    el.disabled = true;
+    try {
+      const r = await LC.api('impresion', { method: 'POST', body: { accion: 'reimprimir', id: d.id } });
+      await LC.imprimir(LC.ticketDe(r.trabajos[0]));
+    } catch (e) { LC.toast(e.message, 'error'); }
+    el.disabled = false;
   };
 
   LC.whatsapp = (msg) => {
@@ -167,6 +206,7 @@
     await LC.cargarEquipo();
     try { await LC.cargarCatalogo(); } catch (e) { console.warn('No se pudo cargar el menú del servidor', e); }
     try { await LC.cargarTurno(); } catch (e) { console.warn('No se pudo cargar el turno del servidor', e); }
+    try { await LC.cargarPedidos(true); } catch (e) { LC.armarPedidos(); console.warn('No se pudieron cargar los pedidos', e); }
   }
   LC.cargarEquipo = async () => {
     if (!LC.can('turno.operar')) return;
@@ -640,14 +680,27 @@
     window.addEventListener('storage', (e) => {
       if (e.key !== LC.KEY) return;
       LC.db = LC.load();
+      LC.armarPedidos();
       if (!LC.user) return LC.render();
       if (!$('#modal-root').innerHTML && !escribiendo()) LC.render();
     });
-    // Cada 30 segundos: trae el estado de la caja (así la mesera ve cuando se abre o se cierra)
+    // Actualización automática, solo con la app a la vista (cuida el límite de llamadas del plan gratis):
+    //  - pantalla de cocina y cola de impresión del PC de caja: cada 4 segundos
+    //  - pedidos en las demás pantallas: cada 16 segundos (y al instante en el equipo que hace un cambio)
+    //  - estado de la caja: cada minuto (así la mesera ve cuando se abre o se cierra)
+    let tick = 0;
     setInterval(() => {
       if (!LC.user || document.hidden) return;
+      tick++;
       const view = LC.state.view;
-      LC.cargarTurno().then(() => { if (['inicio', 'cocina', 'pos', 'caja'].includes(view)) refrescarSiSePuede(view); }).catch(() => {});
-    }, 30000);
+      if (LC.estacionActiva()) LC.revisarImpresion();
+      const cocina = view === 'cocina' && LC.can('cocina.comandas') && LC.state.params.tab !== 'inventario';
+      if (cocina || (tick % 4 === 0 && ['inicio', 'pos', 'orden', 'caja'].includes(view))) {
+        LC.cargarPedidos().then(() => refrescarSiSePuede(view)).catch(() => {});
+      }
+      if (tick % 15 === 0) {
+        LC.cargarTurno().then(() => { if (['inicio', 'cocina', 'pos', 'caja'].includes(view)) refrescarSiSePuede(view); }).catch(() => {});
+      }
+    }, 4000);
   };
 })();

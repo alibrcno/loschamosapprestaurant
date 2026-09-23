@@ -16,6 +16,8 @@ import * as productos from './_rutas/catalogo/productos';
 import * as auditoria from './_rutas/auditoria';
 import * as avisos from './_rutas/avisos';
 import * as equipo from './_rutas/equipo';
+import * as impresion from './_rutas/impresion';
+import * as pedidos from './_rutas/pedidos';
 import * as salud from './_rutas/salud';
 import * as turnoAbrir from './_rutas/turno/abrir';
 import * as turnoAjuste from './_rutas/turno/ajuste';
@@ -26,7 +28,6 @@ import * as turnoLlegada from './_rutas/turno/llegada';
 import * as turnoMovimiento from './_rutas/turno/movimiento';
 import * as turnoSinCocina from './_rutas/turno/terminar-sin-cocina';
 import * as turnoTraslado from './_rutas/turno/traslado';
-import * as turnoVenta from './_rutas/turno/venta';
 import * as usuarios from './_rutas/usuarios';
 
 type Manejador = (req: Request) => Promise<Response>;
@@ -47,6 +48,8 @@ export const RUTAS: Record<string, Modulo> = {
   auditoria,
   avisos,
   equipo,
+  impresion,
+  pedidos,
   salud,
   turno: turnoEstado,
   'turno/abrir': turnoAbrir,
@@ -57,7 +60,6 @@ export const RUTAS: Record<string, Modulo> = {
   'turno/movimiento': turnoMovimiento,
   'turno/terminar-sin-cocina': turnoSinCocina,
   'turno/traslado': turnoTraslado,
-  'turno/venta': turnoVenta,
   usuarios
 };
 

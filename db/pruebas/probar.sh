@@ -36,7 +36,7 @@ echo "== Datos de prueba: negocios chamos-a y chamos-b =="
 psql -X -q -v ON_ERROR_STOP=1 -U neondb_owner -d $BD <<'SQL'
 INSERT INTO tenants (nombre, codigo) VALUES ('Chamos A', 'chamos-a'), ('Chamos B', 'chamos-b');
 INSERT INTO tenants (nombre, codigo, activo) VALUES ('Cerrado', 'chamos-inactivo', false);
-INSERT INTO tenants (nombre, codigo, whatsapp) VALUES ('Chamos C', 'chamos-c', '573001112233'), ('Chamos D', 'chamos-d', '573001112244'), ('Chamos E', 'chamos-e', '573001112255');  -- sin usuarios: pruebas del catálogo (C), del turno (D) y de los avisos (E)
+INSERT INTO tenants (nombre, codigo, whatsapp) VALUES ('Chamos C', 'chamos-c', '573001112233'), ('Chamos D', 'chamos-d', '573001112244'), ('Chamos E', 'chamos-e', '573001112255'), ('Chamos F', 'chamos-f', '573001112266');  -- sin usuarios: pruebas del catálogo (C), del turno (D), de los avisos (E) y de los pedidos (F)
 DO $$
 DECLARE t record;
 BEGIN

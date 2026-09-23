@@ -166,6 +166,10 @@
       ${LC.guard('inventario.entradas', 'cocina.inventario') ? '<button class="btn" data-a="entradaNueva">Llegó mercancía</button>' : ''}
     </div>
     ${LC.can('turno.operar') ? '<button class="btn dark lg block" data-a="go" data-v="cierre">Cerrar caja</button>' : ''}
+    ${LC.can('pos.cobrar') ? `<h3 class="sec">Impresora</h3>
+    <div class="card"><label class="check"><input type="checkbox" data-ch="estacionCambiar" ${LC.estacionActiva() ? 'checked' : ''}><span>Imprimir en este equipo las comandas, pre-cuentas y recibos</span></label>
+      <p class="muted">Actívalo solo en el PC de caja que tiene la impresora, y deja la app abierta ahí.</p>
+      <button class="btn sm" data-a="impresionesVer">Ver impresiones y reimprimir</button></div>` : ''}
     <h3 class="sec">Personal de hoy</h3>
     <div class="chips static">${t.personal.map((p) => `<span class="chip">${esc(p.nombre)}, ${p.area}</span>`).join('')}</div>
     <h3 class="sec">Gastos, ingresos y traslados</h3>
@@ -357,7 +361,7 @@
     const t = LC.turno();
     if (!t && LC.esperandoCocina()) return esperandoCocinaHTML();
     if (!t) return '<div class="empty"><h2>No hay caja abierta</h2></div>';
-    const abiertas = LC.db.ordenes.filter((o) => o.turnoId === t.id && o.estado === 'abierta' && o.lineas.length);
+    const abiertas = LC.db.ordenes.filter((o) => o.turnoId === t.id && o.estado === 'abierta' && !o.local);
     if (abiertas.length) {
       return `<div class="page-head"><h1>Cerrar caja</h1></div>
       <div class="card"><h2>Hay cuentas sin cerrar</h2><p class="muted">Cobra o anula estas cuentas antes de cerrar la caja.</p>
@@ -415,18 +419,12 @@
 
   LC.A.ciConfirmar = async (d, f) => {
     const t = LC.turno(); if (!t || !W) return;
-    // Mientras los pedidos viven en este equipo, se manda al servidor el detalle de lo vendido
-    const tmp = Object.assign({}, t, { cierre: { bebidas: W.bebidas, utensilios: W.utensilios } });
-    const r = LC.resumenTurno(tmp);
-    const ventasPOS = {
-      productos: r.productos, porCategoria: r.porCategoria, ordenesPagadas: r.ordenesPagadas,
-      anulaciones: r.anulaciones, bebidas: LC.bebidasVendidasPOS(t.id, true)
-    };
+    const r = LC.resumenTurno(Object.assign({}, t, { cierre: { bebidas: W.bebidas, utensilios: W.utensilios } }));
     const btn = f.querySelector('button.primary');
     btn.disabled = true;
     let res;
     try {
-      res = await LC.accionTurno('cerrar-caja', { bebidas: W.bebidas, utensilios: W.utensilios, saldos: W.saldos, obs: (d.obs || '').trim(), ventasPOS });
+      res = await LC.accionTurno('cerrar-caja', { bebidas: W.bebidas, utensilios: W.utensilios, saldos: W.saldos, obs: (d.obs || '').trim() });
     } catch (e) {
       btn.disabled = false;
       return LC.toast(e.message, 'error');

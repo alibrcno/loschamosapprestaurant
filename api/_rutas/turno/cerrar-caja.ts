@@ -1,5 +1,5 @@
 // POST /api/turno/cerrar-caja  (permiso turno.operar)
-// { bebidas: {itemId: n}, utensilios: {itemId: n}, saldos: {Efectivo: n, ...}, obs, ventasPOS }
+// { bebidas: {itemId: n}, utensilios: {itemId: n}, saldos: {Efectivo: n, ...}, obs }
 // Paso 1 del cierre (encargada): conteo final de bebidas y utensilios y arqueo. Si algo no cuadra,
 // queda el ajuste en el libro y se exige explicación. Después de esto no se vende más en el turno.
 // El turno termina cuando cocina haga su inventario (o ya lo hizo antes): ahí sale la utilidad.
@@ -11,22 +11,12 @@ import {
   leerSaldos, registrar, saldos, turnoActual
 } from '../../_lib/turno';
 
-const entero = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v) : 0);
-
-/** Detalle de lo vendido que manda la caja (mientras los pedidos viven en cada equipo). */
-function leerVentasPOS(v: unknown) {
-  const o = (v && typeof v === 'object' ? v : {}) as Record<string, any>;
-  const productos = (Array.isArray(o.productos) ? o.productos : []).slice(0, 500)
-    .filter((p: any) => p && typeof p.nombre === 'string')
-    .map((p: any) => ({ nombre: p.nombre.slice(0, 120), qty: entero(p.qty), valor: entero(p.valor) }));
-  const mapa = (m: unknown, max: number) => Object.fromEntries(Object.entries(m && typeof m === 'object' ? m : {}).slice(0, max).map(([k, x]) => [k.slice(0, 120), entero(x)]));
-  return { productos, porCategoria: mapa(o.porCategoria, 100), bebidas: mapa(o.bebidas, 500), ordenesPagadas: entero(o.ordenesPagadas), anulaciones: entero(o.anulaciones) };
-}
-
 export const POST = ruta(async (req) => {
   const b = await leerJson(req);
   const r = await conUsuario(req, 'turno.operar', async (db, u) => {
     const t = exigirCajaAbierta(await turnoActual(db, true));
+    const abiertas = (await db.query(`SELECT count(*) AS n FROM orders WHERE shift_id = $1 AND estado = 'abierta'`, [t.id])).rows[0].n;
+    if (Number(abiertas)) throw new ErrorApi(409, 'Hay cuentas sin cerrar. Cóbralas o anúlalas antes de cerrar la caja.');
     const [bebidas, utensilios] = await Promise.all([itemsDe(db, 'bebida'), itemsDe(db, 'utensilio')]);
     const conteoB = leerConteo(b.bebidas, bebidas, 'bebidas');
     const conteoU = leerConteo(b.utensilios, utensilios, 'utensilios');
@@ -36,7 +26,7 @@ export const POST = ruta(async (req) => {
     const obs = leerObs(b.obs);
     const cierre = {
       en: new Date().toISOString(), por: u.nombre, bebidas: conteoB, utensilios: conteoU,
-      saldosContados: contados, saldosEsperados: esperados, descuadre, obs, ventasPOS: leerVentasPOS(b.ventasPOS)
+      saldosContados: contados, saldosEsperados: esperados, descuadre, obs
     };
     // ¿Cuadra? Las bebidas que faltan según el conteo deben coincidir con las cobradas
     const previo = await calcularResumen(db, { ...t, cierre });

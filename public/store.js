@@ -9,7 +9,7 @@
 'use strict';
 (function () {
   const LC = (window.LC = window.LC || {});
-  LC.VERSION = '2.4.2';
+  LC.VERSION = '2.5.0';
   LC.TENANT = 'loschamos'; // en fase 2 viene del login (multi-negocio)
   LC.KEY = 'lc2_' + LC.TENANT;
 
@@ -206,7 +206,7 @@
       ],
       saldos: Object.fromEntries(LC.CUENTAS.map((c) => [c, 0])),
       turnos: [], turnoActualId: null,
-      ordenes: [], movimientos: [], entradas: [], auditoria: []
+      ordenes: [], borradores: {}, movimientos: [], entradas: [], auditoria: []
     };
     if (migrar) migrarV1(db);
     return db;
@@ -269,12 +269,6 @@
   // Aquí solo se guarda una copia para mostrar las pantallas; cada cambio se hace con la API.
   function aplicarEstado(e) {
     const db = LC.db;
-    // Los números de orden y de comanda todavía los lleva el equipo de la caja (hasta la parte 4)
-    const antes = Object.fromEntries(db.turnos.map((t) => [t.id, t]));
-    e.turnos.forEach((t) => {
-      const a = antes[t.id];
-      if (a) { t.seqOrden = Math.max(t.seqOrden || 0, a.seqOrden || 0); t.seqComanda = Math.max(t.seqComanda || 0, a.seqComanda || 0); }
-    });
     db.turnos = e.turnos;
     db.turnoActualId = e.turnoActualId;
     db.movimientos = e.movimientos;
@@ -282,6 +276,7 @@
     db.saldos = Object.assign(Object.fromEntries(LC.CUENTAS.map((c) => [c, 0])), e.saldos);
     LC.save();
   }
+  LC.aplicarEstado = aplicarEstado;
   LC.cargarTurno = async () => aplicarEstado(await LC.api('turno'));
 
   // Acciones que cambian el stock: después se recarga también el catálogo (que trae el stock)
@@ -291,6 +286,107 @@
     aplicarEstado(e);
     if (CAMBIAN_STOCK.includes(accion)) { try { await LC.cargarCatalogo(); } catch (err) { console.warn(err); } }
     return e;
+  };
+
+  /* ---------------- pedidos (viven en el servidor) ---------------- */
+  // Las cuentas del turno están en el servidor y todos los equipos ven lo mismo. Lo que la mesera
+  // va agregando queda en SU celular como borrador (LC.db.borradores) hasta que toca "Enviar":
+  // ahí se manda todo junto y el servidor pone los precios del menú.
+  // LC.db.ordenes = cuentas del servidor + borradores de este equipo (misma forma de siempre).
+  let srv = {}, hasta = null, turnoPed = null;
+  LC.impresionPendiente = 0;   // impresiones que el PC de caja no ha sacado
+  LC.alias = {};               // id de una cuenta nueva en este equipo → id que le dio el servidor
+
+  LC.cargarPedidos = async (completo) => {
+    // Normalmente se piden solo las cuentas que cambiaron desde la última vez
+    const parcial = !completo && hasta && turnoPed;
+    const r = await LC.api('pedidos' + (parcial ? '?desde=' + encodeURIComponent(hasta) : ''));
+    if (parcial && r.turnoId !== turnoPed) return LC.cargarPedidos(true);
+    if (!parcial) srv = {};
+    turnoPed = r.turnoId; hasta = r.hasta; LC.impresionPendiente = r.impresionPendiente || 0;
+    r.ordenes.forEach((o) => (srv[o.id] = o));
+    // Si el turno cambió (se abrió o se cerró la caja en otro equipo), se trae también el turno
+    if ((r.turnoId || null) !== (LC.db.turnoActualId || null)) { try { await LC.cargarTurno(); } catch (e) { console.warn(e); } }
+    LC.armarPedidos();
+  };
+  LC.recibirOrden = (o) => { if (o) srv[o.id] = o; LC.armarPedidos(); };
+
+  LC.armarPedidos = () => {
+    const db = LC.db, t = LC.turnoCocina(), b = db.borradores || (db.borradores = {});
+    const lista = Object.values(srv).filter((o) => t && o.turnoId === t.id).map((o) => Object.assign({}, o, { lineas: o.lineas.slice() }));
+    // 1. Se botan borradores de otro turno o de cuentas que ya se cobraron o se cerraron.
+    //    Si otra mesera ya abrió la misma mesa, lo que lleva este equipo se suma a esa cuenta.
+    Object.keys(b).forEach((k) => {
+      const d = b[k];
+      if (!t || d.turnoId !== t.id) return delete b[k];
+      if (srv[k]) { if (srv[k].estado !== 'abierta') delete b[k]; return; }
+      if (!d.nueva) return delete b[k];
+      const o = d.nueva.tipo === 'mesa' && !d.lote && lista.find((x) => x.estado === 'abierta' && x.tipo === 'mesa' && x.mesa === d.nueva.mesa);
+      if (o) {
+        const dest = b[o.id] || (b[o.id] = { turnoId: t.id, lineas: [] });
+        dest.lineas = dest.lineas.concat(d.lineas); dest.lote = null;
+        delete b[k]; LC.alias[k] = o.id;
+      }
+    });
+    // 2. Cada borrador se muestra dentro de su cuenta (o como cuenta nueva, aún sin enviar)
+    Object.keys(b).forEach((k) => {
+      const d = b[k];
+      let o = lista.find((x) => x.id === k);
+      if (!o) {
+        o = Object.assign({ id: k, local: true, turnoId: d.turnoId, numero: null, estado: 'abierta', comandas: [], pagos: [], creadaEn: d.creadaEn,
+          mesero: d.mesero, precuentaEn: null, mesa: null, cliente: '', telefono: '', direccion: '', nota: '' }, d.nueva, { lineas: [] });
+        lista.push(o);
+      }
+      o.lineas = o.lineas.concat(d.lineas);
+    });
+    db.ordenes = lista;
+    LC.save();
+  };
+
+  // Borrador de una cuenta en este equipo (se crea vacío si no existe)
+  LC.borrador = (o) => LC.db.borradores[o.id] || (LC.db.borradores[o.id] = { turnoId: o.turnoId, lineas: [] });
+  LC.nuevaCuenta = (nueva) => {
+    const id = 'n' + LC.uid();
+    LC.db.borradores[id] = { turnoId: LC.turno().id, nueva, creadaEn: new Date().toISOString(), mesero: LC.user.nombre, lineas: [] };
+    LC.armarPedidos();
+    return id;
+  };
+  const uuid = () => {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+    const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  };
+  const paraServidor = (l) => {
+    if (l.tipo === 'pizza') return { tipo: 'pizza', id: l.pizza.id, tamano: l.pizza.tam, sabores: l.pizza.sabores, qty: l.qty, obs: l.obs };
+    if (l.tipo === 'bebida') return { tipo: 'bebida', id: l.bebidaId, qty: l.qty, obs: l.obs };
+    if (l.tipo === 'domicilio') return { tipo: 'domicilio', monto: l.precio, qty: 1 };
+    return { tipo: 'producto', id: l.pid, qty: l.qty, obs: l.obs };
+  };
+
+  // Manda al servidor todo el borrador de una cuenta. El "lote" identifica este envío: si el internet
+  // se corta y se vuelve a enviar, el servidor reconoce que ya lo tenía y no lo duplica.
+  LC.enviarPedido = async (o) => {
+    const d = LC.db.borradores[o.id];
+    if (!d || !d.lineas.length) return null;
+    if (!d.lote) { d.lote = uuid(); LC.save(); }
+    const body = { accion: 'enviar', lote: d.lote, lineas: d.lineas.map(paraServidor) };
+    if (o.local) body.nueva = d.nueva; else body.orden = o.id;
+    const r = await LC.api('pedidos', { method: 'POST', body });
+    delete LC.db.borradores[o.id];
+    if (o.local) LC.alias[o.id] = r.orden.id;
+    LC.recibirOrden(r.orden);
+    if (LC.estacionActiva && LC.estacionActiva()) setTimeout(LC.revisarImpresion, 300);
+    return r;
+  };
+  // Cualquier otro cambio de una cuenta: quitar, anular, pre-cuenta, cobrar, cambiar de mesa…
+  LC.accionPedido = async (accion, body) => {
+    const r = await LC.api('pedidos', { method: 'POST', body: Object.assign({ accion }, body) });
+    if (r.estado) aplicarEstado(r.estado);
+    LC.recibirOrden(r.orden);
+    if (LC.estacionActiva && LC.estacionActiva()) setTimeout(LC.revisarImpresion, 300);
+    return r;
   };
 
   LC.totalOrden = (o) => o.lineas.filter((l) => !l.anulada).reduce((a, l) => a + l.precio * l.qty, 0);

@@ -29,7 +29,9 @@ Los datos de la versión anterior (bebidas, utensilios, insumos) se importan sol
 
 **4 p. m. Apertura (encargada).** Asistente obligatorio: quién trabaja y en qué área (debe haber alguien en cocina) → conteo de bebidas → conteo de utensilios → arqueo de Efectivo, Nequi, Bancolombia y Datáfono → revisión. Si algo no cuadra con lo que dice el sistema, pide explicación. Al abrir envía el reporte por WhatsApp.
 
-**Pedidos (mesera / encargada).** Mesa → productos por categoría → pizzas con tamaño y sabores (el precio se calcula solo) → **Enviar a cocina** (solo imprime lo nuevo, con número de comanda y hora) → el cliente puede pedir más → **Pre-cuenta** → **Cobrar** con uno o varios medios de pago; en efectivo escribes lo que entrega y muestra el cambio → la mesa queda libre.
+**Pedidos (mesera / encargada).** Cada mesera usa su celular. Mesa → productos por categoría → pizzas con tamaño y sabores (el precio se calcula solo). Lo que va agregando queda **"Por enviar"** solo en su celular y lo puede corregir libremente → **Enviar a cocina** manda todo junto: la comanda (solo lo nuevo, con número y hora) sale impresa en el PC de caja y aparece en la pantalla de cocina → el cliente puede pedir más → **Pre-cuenta** (también se imprime en caja) → **Cobrar** con uno o varios medios de pago; en efectivo escribes lo que entrega y muestra el cambio → la mesa queda libre en todos los equipos. Si dos meseras abren la misma mesa, lo de las dos va a la misma cuenta.
+
+**Impresora (PC de caja).** En el PC que tiene la impresora, la encargada entra a **Caja → Impresora** y activa "Imprimir en este equipo". Ese PC imprime solo, cada pocos segundos, las comandas, pre-cuentas y recibos que pidan desde cualquier celular (deja la app abierta ahí, no minimizada). En **Ver impresiones y reimprimir** se saca otra vez un papel que salió mal. Si en Pedidos aparece "Hay impresiones esperando en caja", el PC de caja no tiene la app abierta o no tiene activada la opción.
 
 **Cocina.** Pantalla de comandas (pendiente → listo → entregado, con alerta por tiempo). Registra lo que llega en peso o cantidad. **Cocina cierra de último:** después de que la encargada cierra la caja, hace el inventario de cierre; la app calcula lo gastado (abrió + llegó − queda), su costo y la lista de compras, y la envía por WhatsApp. Con ese último paso termina el turno y se calcula el resultado del día (queda en Reportes → Turnos).
 
@@ -42,7 +44,8 @@ Los datos de la versión anterior (bebidas, utensilios, insumos) se importan sol
 - Cada peso que se mueve queda en un **libro contable** por cuenta. El saldo "debería haber" sale del libro, no de lo que alguien escriba.
 - Los conteos son **ciegos**: quien cuenta no ve lo esperado; la diferencia aparece después y queda registrada.
 - Bebidas: lo que falta según el conteo se compara con lo que se cobró en el POS.
-- Nada se borra: quitar productos ya enviados a cocina exige permiso de anular y motivo. Ajustes de stock también piden motivo. Todo queda en **Auditoría**.
+- Nada se borra: quitar productos ya enviados a cocina o que ya salieron en la pre-cuenta exige permiso de anular y motivo. Ajustes de stock también piden motivo. Todo queda en **Auditoría**.
+- Los precios los pone el servidor con el menú guardado, no el celular: nadie puede cobrar una pizza a otro precio.
 - **Utilidad estimada** = ventas − costo de lo consumido (bebidas, insumos, utensilios) − gastos operativos. Las compras de inventario no se restan dos veces: se restan cuando se consumen.
 
 ## Errores que tenía la versión anterior
@@ -61,8 +64,7 @@ Los datos de la versión anterior (bebidas, utensilios, insumos) se importan sol
 
 ## Limitaciones de esta fase
 
-- **Los datos viven en el navegador de un solo equipo.** Si la mesera usa su celular y la caja un computador, no se ven entre sí. Es la razón principal para pasar a Neon.
-- Descarga un respaldo cada semana (Ajustes → Datos).
+- Desde la fase 3 los datos viven en el servidor (Neon) y todos los equipos ven lo mismo. Lo único que queda en cada celular es lo "Por enviar".
 - WhatsApp se abre con el mensaje listo y hay que tocar "Enviar".
 - Las contraseñas usan SHA-256 con sal cuando la app se abre desde `https://` o `localhost`. Abriendo el archivo directo funciona igual, pero si luego cambias de modo hay que volver a crear las claves. Desde la fase 2 las claves se validan en el servidor.
 
@@ -78,6 +80,6 @@ El navegador **nunca** se conecta directo a Neon: la cadena de conexión daría 
 2. **API:** endpoints `/auth/login`, `/shifts`, `/orders`, `/payments`, `/inventory`, `/ledger`, `/reports`. Claves con bcrypt, sesión con cookie httpOnly. Los permisos se revisan **en el servidor** en cada llamada.
 3. **Multitenant:** cada negocio tiene su `tenant_id`; la API hace `SET LOCAL app.tenant_id` por petición y Row Level Security impide ver datos de otro negocio. Se ingresa con **código de negocio** (`loschamos`) + usuario + contraseña.
 4. **Frontend:** se reemplazan las funciones de `store.js` (`load`, `save`, `mov`…) por llamadas a la API. El resto de la app no cambia.
-5. **Tiempo real:** comandas nuevas en la pantalla de cocina y mesas actualizadas en todos los equipos (consulta cada pocos segundos al inicio; luego WebSockets o Server-Sent Events).
+5. **Tiempo real:** la pantalla de cocina y el PC de caja consultan cada 4 segundos; los celulares cada 16 segundos y al instante cuando alguien hace un cambio. Solo con la app a la vista, para no gastar llamadas del plan gratis de Vercel.
 6. **WhatsApp automático:** WhatsApp Business Cloud API (Meta) con plantillas aprobadas, o Twilio. El cierre se envía solo sin tocar nada.
 7. **Opcional:** facturación electrónica DIAN a través de un proveedor autorizado, impresora térmica por red, modo sin internet con cola de sincronización.

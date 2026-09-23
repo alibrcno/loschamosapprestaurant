@@ -2,6 +2,7 @@
 // Apertura → gastos, traslado, llegadas, ventas → cierre de caja (encargada) → inventario de cocina,
 // que es el último paso y el que calcula el resultado del día.
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
 import * as api from '../api/index';
 import { cerrarConexiones } from '../api/_lib/db';
@@ -17,7 +18,7 @@ async function llamar(ruta: string, metodo: string, cuerpo?: unknown, cookie?: s
 const entrar = async (usuario: string, clave: string) => (await llamar('auth/login', 'POST', { codigo: 'chamos-d', usuario, clave })).cookie;
 
 let admin = '', enc = '', cocina = '', mesera = '';
-let coca = '', servilletas = '', queso = '', idCocinero = '';
+let coca = '', servilletas = '', queso = '', pizza = '', idCocinero = '';
 
 before(async () => {
   process.env.CLAVE_INSTALACION = 'frase-de-instalacion-larga';
@@ -27,12 +28,12 @@ before(async () => {
   await llamar('usuarios', 'POST', { nombre: 'Mesera D', usuario: 'mesd', clave: '1234', rol: 'mesera' }, admin);
   [enc, cocina, mesera] = [await entrar('encd', '1234'), await entrar('cocid', '1234'), await entrar('mesd', '1234')];
   const ids = (await llamar('catalogo/importar', 'POST', {
-    categorias: [], productos: [], pizzas: [],
+    categorias: [], productos: [{ id: 'p', categoria: 'Especiales', nombre: 'Pizza de la casa', precio: 54000 }], pizzas: [],
     bebidas: [{ id: 'c', nombre: 'Coca-Cola', unidad: 'und', precio: 4000, costo: 2600, sugerido: 24, stock: 0 }],
     utensilios: [{ id: 's', nombre: 'Servilletas', unidad: 'paquete', costo: 3500, sugerido: 10, stock: 0 }],
     insumos: [{ id: 'q', nombre: 'Queso', unidad: 'kg', costo: 24000, sugerido: 5, stock: 1 }]
   }, admin)).datos.ids;
-  [coca, servilletas, queso] = [ids.c, ids.s, ids.q];
+  [coca, servilletas, queso, pizza] = [ids.c, ids.s, ids.q, ids.p];
 });
 after(cerrarConexiones);
 
@@ -91,15 +92,18 @@ describe('API: turno y caja', () => {
   });
 
   test('Cobro dividido: mitad Nequi, mitad efectivo', async () => {
-    const venta = { concepto: 'Mesa 3, orden #001', pagos: [{ cuenta: 'Nequi', monto: 31000 }, { cuenta: 'Efectivo', monto: 31000 }] };
-    assert.equal((await llamar('turno/venta', 'POST', venta, mesera)).status, 403, 'la mesera no cobra');
-    const r = await llamar('turno/venta', 'POST', venta, enc);
+    const env = await llamar('pedidos', 'POST', { accion: 'enviar', lote: randomUUID(), nueva: { tipo: 'mesa', mesa: 3 },
+      lineas: [{ tipo: 'producto', id: pizza, qty: 1 }, { tipo: 'bebida', id: coca, qty: 2 }] }, mesera);
+    assert.equal(env.status, 201);
+    const cobro = { accion: 'cobrar', orden: env.datos.orden.id, total: 62000, pagos: [{ cuenta: 'Nequi', monto: 31000 }, { cuenta: 'Efectivo', monto: 31000 }] };
+    assert.equal((await llamar('pedidos', 'POST', cobro, mesera)).status, 403, 'la mesera no cobra');
+    const r = await llamar('pedidos', 'POST', cobro, enc);
     assert.equal(r.status, 201);
-    assert.deepEqual([r.datos.saldos.Efectivo, r.datos.saldos.Nequi], [31000, 31000]);
+    assert.deepEqual([r.datos.estado.saldos.Efectivo, r.datos.estado.saldos.Nequi], [31000, 31000]);
   });
 
   test('Cierre de caja (encargada): exige explicar diferencias y deja el turno esperando a cocina', async () => {
-    const cierre = { bebidas: { [coca]: 20 }, utensilios: { [servilletas]: 4 }, saldos: { Efectivo: 31000, Nequi: 31000, Bancolombia: 30000, 'Datáfono': 0 }, ventasPOS: { ordenesPagadas: 1, bebidas: { [coca]: 2 }, productos: [{ nombre: 'Pizza', qty: 1, valor: 54000 }], porCategoria: { Pizzas: 54000, Bebidas: 8000 } } };
+    const cierre = { bebidas: { [coca]: 20 }, utensilios: { [servilletas]: 4 }, saldos: { Efectivo: 31000, Nequi: 31000, Bancolombia: 30000, 'Datáfono': 0 } };
     const falta = await llamar('turno/cerrar-caja', 'POST', { ...cierre, saldos: { ...cierre.saldos, Efectivo: 30000 } }, enc);
     assert.equal(falta.status, 400, 'faltan $1.000 en efectivo y no hay explicación');
     const bebidaSinCobrar = await llamar('turno/cerrar-caja', 'POST', { ...cierre, bebidas: { [coca]: 19 } }, enc);
@@ -113,7 +117,7 @@ describe('API: turno y caja', () => {
   });
 
   test('Con la caja cerrada ya no se vende ni se abre otro turno hasta que cocina termine', async () => {
-    assert.equal((await llamar('turno/venta', 'POST', { concepto: 'x', pagos: [{ cuenta: 'Efectivo', monto: 1000 }] }, enc)).status, 409);
+    assert.equal((await llamar('pedidos', 'POST', { accion: 'enviar', lote: randomUUID(), nueva: { tipo: 'mesa', mesa: 1 }, lineas: [{ tipo: 'bebida', id: coca, qty: 1 }] }, enc)).status, 409);
     assert.equal((await llamar('turno/movimiento', 'POST', { tipo: 'gasto', cuenta: 'Efectivo', monto: 1000, concepto: 'x', categoria: 'Otros' }, enc)).status, 409);
     const otra = await llamar('turno/abrir', 'POST', apertura(), enc);
     assert.equal(otra.status, 409);
@@ -138,6 +142,10 @@ describe('API: turno y caja', () => {
     assert.equal(res.cocinaCerrada, true);
     assert.deepEqual(res.descuadre, { Efectivo: 0, Nequi: 0, Bancolombia: 0, 'Datáfono': 0 });
     assert.equal(res.personal.length, 2);
+    // Lo vendido sale de las cuentas cobradas en el servidor
+    assert.equal(res.ordenesPagadas, 1);
+    assert.deepEqual(res.porCategoria, { Especiales: 54000, Bebidas: 8000 });
+    assert.equal(res.bebidas.find((b: any) => b.id === coca).pos, 2);
   });
 
   test('Si cocina no hace inventario, la encargada puede terminar el turno con un motivo', async () => {

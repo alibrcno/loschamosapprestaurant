@@ -2,6 +2,7 @@
 // imitan a Telegram y a Resend: nunca se escribe a Telegram ni se envían correos de verdad.
 // Negocio de prueba: "chamos-e".
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { createServer, Server } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { after, before, describe, test } from 'node:test';
@@ -108,9 +109,10 @@ describe('Avisos del cierre por Telegram y correo', () => {
 
   test('Al cerrar la caja llega el aviso; al cerrar cocina llega el resultado con la utilidad', async () => {
     await llamar('turno/abrir', 'POST', { personal: [{ nombre: 'Cocina E', area: 'Cocina' }], bebidas: { [ids.c]: 10 }, utensilios: {}, saldos }, enc);
-    await llamar('turno/venta', 'POST', { concepto: 'Mesa 1', pagos: [{ cuenta: 'Efectivo', monto: 8000 }] }, enc);
+    const o = (await llamar('pedidos', 'POST', { accion: 'enviar', lote: randomUUID(), nueva: { tipo: 'mesa', mesa: 1 }, lineas: [{ tipo: 'bebida', id: ids.c, qty: 2 }] }, enc)).datos.orden;
+    await llamar('pedidos', 'POST', { accion: 'cobrar', orden: o.id, total: 8000, pagos: [{ cuenta: 'Efectivo', monto: 8000 }] }, enc);
     recibidos.length = 0;
-    const caja = await llamar('turno/cerrar-caja', 'POST', { bebidas: { [ids.c]: 8 }, utensilios: {}, saldos: { ...saldos, Efectivo: 8000 }, ventasPOS: { ordenesPagadas: 1, bebidas: { [ids.c]: 2 } } }, enc);
+    const caja = await llamar('turno/cerrar-caja', 'POST', { bebidas: { [ids.c]: 8 }, utensilios: {}, saldos: { ...saldos, Efectivo: 8000 } }, enc);
     assert.equal(caja.status, 201);
     assert.deepEqual(caja.datos.avisos, { telegram: 'enviado', correo: 'enviado' });
     assert.equal(caja.datos.tenantId, undefined, 'no se devuelven datos internos');

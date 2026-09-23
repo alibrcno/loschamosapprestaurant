@@ -6,6 +6,7 @@ import type { PoolClient } from 'pg';
 import { Usuario, puede } from './auth';
 import { cantidad } from './catalogo';
 import { ErrorApi, pesos, texto } from './http';
+import { ventasDelTurno } from './pedidos';
 
 export const AREAS = ['Cocina', 'Salón', 'Caja', 'Domicilios'];
 export const CAT_GASTO = ['Compra de inventario', 'Nómina', 'Domiciliario', 'Servicios públicos', 'Arriendo', 'Mantenimiento', 'Otros'];
@@ -113,9 +114,9 @@ export async function calcularResumen(db: PoolClient, t: Turno) {
     } else if (m.tipo === 'ingreso') ingresos += m.monto;
   }
 
-  // Detalle de lo vendido (productos, categorías, bebidas): lo manda la caja al cerrar mientras
-  // los pedidos viven en cada equipo. En la parte 4 saldrá de las órdenes guardadas en el servidor.
-  const pos = (t.cierre && t.cierre.ventasPOS) || {};
+  // Detalle de lo vendido (productos, categorías, bebidas): sale de las cuentas cobradas en el servidor.
+  // Los turnos de antes de la parte 4 lo traen en el cierre (ventasPOS), porque los pedidos vivían en la caja.
+  const pos: any = (t.cierre && t.cierre.ventasPOS) || await ventasDelTurno(db, t.id);
   const ordenesPagadas = num(pos.ordenesPagadas);
 
   const items = (await db.query('SELECT id, tipo, nombre, unidad, precio, costo, sugerido FROM inventory_items WHERE activo ORDER BY nombre')).rows;
