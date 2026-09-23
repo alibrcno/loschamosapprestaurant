@@ -11,12 +11,18 @@ BEGIN;
 --    El turno existe desde que abre cocina; se vende solo con la caja abierta.
 ALTER TABLE shifts
   ADD COLUMN caja_abierta_en  timestamptz,
-  ADD COLUMN caja_abierta_por uuid,
+  ADD COLUMN caja_abierta_por uuid;
+-- Los turnos de antes los abrió la encargada: la caja se abrió al mismo tiempo que el turno.
+-- (Se llena ANTES de poner las reglas, porque los turnos ya cerrados las necesitan cumplidas.)
+-- El aislamiento por negocio (RLS) está forzado incluso para el dueño de la base: sin negocio fijado
+-- el UPDATE no vería ningún turno. Se quita el "forzado" solo durante esta transacción y se vuelve a poner.
+ALTER TABLE shifts NO FORCE ROW LEVEL SECURITY;
+UPDATE shifts SET caja_abierta_en = abierto_en, caja_abierta_por = abierto_por;
+ALTER TABLE shifts FORCE ROW LEVEL SECURITY;
+ALTER TABLE shifts
   ADD CONSTRAINT shifts_caja_abierta_por_fkey FOREIGN KEY (tenant_id, caja_abierta_por) REFERENCES users(tenant_id, id),
   ADD CONSTRAINT shifts_caja_abierta_check CHECK ((caja_abierta_en IS NULL) = (caja_abierta_por IS NULL)),
   ADD CONSTRAINT shifts_caja_orden_check CHECK (caja_cerrada_en IS NULL OR caja_abierta_en IS NOT NULL);
--- Los turnos de antes los abrió la encargada: la caja se abrió al mismo tiempo que el turno
-UPDATE shifts SET caja_abierta_en = abierto_en, caja_abierta_por = abierto_por;
 
 -- 2. Nota general de la mesera para cocina en cada comanda ("la mesa 3 tiene afán")
 ALTER TABLE kitchen_tickets ADD COLUMN nota text;

@@ -25,6 +25,12 @@ SQL
 
 echo "== Migraciones (como neondb_owner) =="
 for f in migrations/*.sql; do
+  # Antes de la 005 se cargan datos como los que ya existen en Neon (turnos cerrados, cuentas cobradas):
+  # las migraciones nuevas deben funcionar sobre una base con datos, no solo sobre una vacía.
+  if [[ "$f" == migrations/005_* ]]; then
+    echo "   (datos de un negocio que ya viene trabajando: pruebas/datos_viejos.sql)"
+    psql -X -q -v ON_ERROR_STOP=1 -U neondb_owner -d $BD -f pruebas/datos_viejos.sql
+  fi
   echo "   $f"
   psql -X -q -v ON_ERROR_STOP=1 -U neondb_owner -d $BD -f "$f"
 done
