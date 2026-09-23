@@ -110,6 +110,13 @@ SELECT pg_temp.ok(dia_colombia('2026-09-23 06:00Z') = '2026-09-23' AND dia_colom
   'Las 11:59 p. m. en Colombia (04:59 UTC del 23) todavía es 22 de septiembre');
 SELECT pg_temp.debe_fallar($$INSERT INTO shifts (tenant_id, abierto_por) SELECT current_tenant(), id FROM users LIMIT 1$$,
   'No se pueden tener dos turnos abiertos a la vez');
+SELECT pg_temp.debe_fallar($$UPDATE shifts SET cerrado_en = now(), cerrado_por = abierto_por$$,
+  'El turno no puede terminar antes de que la encargada cierre la caja');
+SAVEPOINT caja;
+UPDATE shifts SET caja_cerrada_en = now(), caja_cerrada_por = abierto_por;
+SELECT pg_temp.debe_fallar($$INSERT INTO shifts (tenant_id, abierto_por) SELECT current_tenant(), id FROM users LIMIT 1$$,
+  'Con la caja cerrada pero cocina sin inventario, todavía no se puede abrir otro turno');
+ROLLBACK TO SAVEPOINT caja;
 INSERT INTO orders (tenant_id, shift_id, numero, tipo, mesa) SELECT current_tenant(), id, 1, 'mesa', 3 FROM shifts;
 SELECT pg_temp.debe_fallar($$INSERT INTO orders (tenant_id, shift_id, numero, tipo, mesa) SELECT current_tenant(), id, 2, 'mesa', 3 FROM shifts$$,
   'La mesa 3 no puede tener dos cuentas abiertas');

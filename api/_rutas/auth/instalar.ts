@@ -34,6 +34,11 @@ export const POST = ruta(async (req) => {
       [tenantId, nombre, usuario, hash, PERMISOS]
     );
     const u = q.rows[0];
+    // Cuentas de dinero por defecto, si el negocio todavía no tiene
+    await db.query(
+      `INSERT INTO accounts (tenant_id, nombre, orden)
+       SELECT $1, c.nombre, c.orden FROM (VALUES ('Efectivo', 1), ('Nequi', 2), ('Bancolombia', 3), ('Datáfono', 4)) AS c(nombre, orden)
+       WHERE NOT EXISTS (SELECT 1 FROM accounts)`, [tenantId]);
     await auditar(db, tenantId, u.id, 'Instalación', `Administrador ${nombre} creado`);
     return { cookie: await crearSesion(db, u, req.headers.get('user-agent')), usuario: { id: u.id, nombre, usuario, rol: u.rol } };
   });

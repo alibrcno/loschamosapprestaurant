@@ -13,8 +13,19 @@ import * as inventario from './_rutas/catalogo/inventario';
 import * as negocio from './_rutas/catalogo/negocio';
 import * as pizzas from './_rutas/catalogo/pizzas';
 import * as productos from './_rutas/catalogo/productos';
+import * as auditoria from './_rutas/auditoria';
 import * as equipo from './_rutas/equipo';
 import * as salud from './_rutas/salud';
+import * as turnoAbrir from './_rutas/turno/abrir';
+import * as turnoAjuste from './_rutas/turno/ajuste';
+import * as turnoCerrarCaja from './_rutas/turno/cerrar-caja';
+import * as turnoCerrarCocina from './_rutas/turno/cerrar-cocina';
+import * as turnoEstado from './_rutas/turno/estado';
+import * as turnoLlegada from './_rutas/turno/llegada';
+import * as turnoMovimiento from './_rutas/turno/movimiento';
+import * as turnoSinCocina from './_rutas/turno/terminar-sin-cocina';
+import * as turnoTraslado from './_rutas/turno/traslado';
+import * as turnoVenta from './_rutas/turno/venta';
 import * as usuarios from './_rutas/usuarios';
 
 type Manejador = (req: Request) => Promise<Response>;
@@ -32,8 +43,19 @@ export const RUTAS: Record<string, Modulo> = {
   'catalogo/negocio': negocio,
   'catalogo/pizzas': pizzas,
   'catalogo/productos': productos,
+  auditoria,
   equipo,
   salud,
+  turno: turnoEstado,
+  'turno/abrir': turnoAbrir,
+  'turno/ajuste': turnoAjuste,
+  'turno/cerrar-caja': turnoCerrarCaja,
+  'turno/cerrar-cocina': turnoCerrarCocina,
+  'turno/llegada': turnoLlegada,
+  'turno/movimiento': turnoMovimiento,
+  'turno/terminar-sin-cocina': turnoSinCocina,
+  'turno/traslado': turnoTraslado,
+  'turno/venta': turnoVenta,
   usuarios
 };
 
