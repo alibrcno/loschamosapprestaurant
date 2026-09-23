@@ -14,14 +14,22 @@ import { ErrorApi, json, leerJson, ruta } from '../_lib/http';
 async function guardar(db: PoolClient, d: Destinos & { telegramCodigo?: string | null; codigoVence?: number | null }) {
   await db.query(`UPDATE tenants SET config = jsonb_set(config, '{avisos}', $1::jsonb, true)`, [JSON.stringify(d)]);
 }
-async function nombreBot(): Promise<string | null> {
-  if (!telegramDisponible()) return null;
-  try { return (await telegram('getMe')).username; } catch { return null; }
+/** Nombre del bot, o por qué Telegram no lo reconoce (token mal copiado, bot borrado…). */
+async function revisarBot(): Promise<{ bot: string | null; problema: string | null }> {
+  if (!telegramDisponible()) return { bot: null, problema: 'Falta TELEGRAM_BOT_TOKEN en Vercel' };
+  try { return { bot: (await telegram('getMe')).username, problema: null }; }
+  catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    return { bot: null, problema: /401|404/.test(m)
+      ? 'Telegram no reconoce el token guardado en Vercel (TELEGRAM_BOT_TOKEN). Revisa que esté completo, sin espacios ni comillas, y vuelve a publicar (Redeploy).'
+      : 'No se pudo hablar con Telegram: ' + m };
+  }
 }
 async function estado(db: PoolClient) {
   const { destinos } = await leerDestinos(db);
+  const { bot, problema } = await revisarBot();
   return {
-    telegram: { disponible: telegramDisponible(), bot: await nombreBot(), conectado: !!destinos.telegramChatId },
+    telegram: { disponible: telegramDisponible(), bot, problema, conectado: !!destinos.telegramChatId },
     correo: { disponible: correoDisponible(), correo: destinos.correo || '' }
   };
 }
@@ -35,8 +43,8 @@ export const POST = ruta(async (req) => {
     const d = { ...destinos } as Destinos & { telegramCodigo?: string | null; codigoVence?: number | null };
 
     if (b.accion === 'telegram-codigo') {
-      const bot = await nombreBot();
-      if (!bot) throw new ErrorApi(503, 'El servidor todavía no tiene el bot de Telegram (falta TELEGRAM_BOT_TOKEN en Vercel)');
+      const { bot, problema } = await revisarBot();
+      if (!bot) throw new ErrorApi(503, problema || 'Telegram no respondió');
       d.telegramCodigo = randomBytes(6).toString('hex');
       d.codigoVence = Date.now() + 15 * 60_000;
       await guardar(db, d);

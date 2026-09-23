@@ -453,6 +453,8 @@
     const a = avisosSrv, tg = a.telegram, co = a.correo;
     const telegram = !tg.disponible
       ? '<p class="notice">Falta crear el bot de Telegram del servidor (variable TELEGRAM_BOT_TOKEN en Vercel).</p>'
+      : !tg.bot
+        ? `<p class="notice bad">${esc(tg.problema || 'Telegram no responde')}</p>`
       : tg.conectado
         ? '<p><span class="tag ok">Telegram conectado</span> <button type="button" class="btn sm ghost" data-a="avisoTelegramQuitar">Desconectar</button></p>'
         : enlaceTelegram

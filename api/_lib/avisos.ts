@@ -12,12 +12,14 @@ const TG = () => process.env.TELEGRAM_API_URL || 'https://api.telegram.org';
 const RESEND = () => process.env.RESEND_API_URL || 'https://api.resend.com';
 const ESPERA_MS = 8000;
 
-export const telegramDisponible = () => !!process.env.TELEGRAM_BOT_TOKEN;
-export const correoDisponible = () => !!process.env.RESEND_API_KEY;
+// Se quitan espacios y comillas que a veces se cuelan al copiar el token en Vercel
+const tokenTelegram = () => (process.env.TELEGRAM_BOT_TOKEN || '').trim().replace(/^["']|["']$/g, '');
+export const telegramDisponible = () => !!tokenTelegram();
+export const correoDisponible = () => !!(process.env.RESEND_API_KEY || '').trim();
 
 /* ---------------- Telegram ---------------- */
 export async function telegram(metodo: string, datos: Record<string, unknown> = {}): Promise<any> {
-  const r = await fetch(`${TG()}/bot${process.env.TELEGRAM_BOT_TOKEN}/${metodo}`, {
+  const r = await fetch(`${TG()}/bot${tokenTelegram()}/${metodo}`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(datos), signal: AbortSignal.timeout(ESPERA_MS)
   });
   const j = (await r.json().catch(() => ({}))) as any;
@@ -33,7 +35,7 @@ export async function enviarTelegram(chatId: string, texto: string) {
 export async function enviarCorreo(para: string, asunto: string, texto: string) {
   const r = await fetch(`${RESEND()}/emails`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${(process.env.RESEND_API_KEY || '').trim()}` },
     body: JSON.stringify({ from: process.env.RESEND_FROM || 'Los Chamos POS <onboarding@resend.dev>', to: [para], subject: asunto, text: texto }),
     signal: AbortSignal.timeout(ESPERA_MS)
   });

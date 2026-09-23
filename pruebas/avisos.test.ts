@@ -70,7 +70,19 @@ describe('Avisos del cierre por Telegram y correo', () => {
   test('Solo quien ve reportes configura los avisos', async () => {
     assert.equal((await llamar('avisos', 'GET', undefined, enc)).status, 403);
     const r = await llamar('avisos', 'GET', undefined, admin);
-    assert.deepEqual(r.datos, { telegram: { disponible: true, bot: 'LosChamosBot', conectado: false }, correo: { disponible: true, correo: '' } });
+    assert.deepEqual(r.datos, { telegram: { disponible: true, bot: 'LosChamosBot', problema: null, conectado: false }, correo: { disponible: true, correo: '' } });
+  });
+
+  test('Si el token de Telegram está mal copiado, lo dice claro', async () => {
+    const bueno = process.env.TELEGRAM_BOT_TOKEN;
+    process.env.TELEGRAM_BOT_TOKEN = ' "token-prueba" ';
+    assert.equal((await llamar('avisos', 'GET', undefined, admin)).datos.telegram.bot, 'LosChamosBot', 'se ignoran espacios y comillas al copiar');
+    falla = true;
+    const r = await llamar('avisos', 'POST', { accion: 'telegram-codigo' }, admin);
+    falla = false;
+    process.env.TELEGRAM_BOT_TOKEN = bueno;
+    assert.equal(r.status, 503);
+    assert.match(r.datos.error, /No se pudo hablar con Telegram/);
   });
 
   test('Conectar Telegram con un enlace y el botón Iniciar', async () => {
