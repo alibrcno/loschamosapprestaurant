@@ -116,7 +116,9 @@ legend { font-size: .88rem; font-weight: 600; color: var(--ink-2); margin-bottom
 .wiz-nav .btn.primary { flex: 1; }
 .inline-label { flex-direction: row; align-items: center; gap: 10px; margin-bottom: 12px; }
 .inline-label input { width: auto; }
-.filters { display: flex; gap: 8px; margin-bottom: 12px; }
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.tabla-scroll { overflow-x: auto; }
+.fila-llegada, .fila-material { border-bottom: 1px dashed var(--line, #ddd); padding-bottom: 6px; margin-bottom: 6px; }
 
 /* ---------- pasos del asistente ---------- */
 .stepper { list-style: none; display: flex; gap: 4px; margin-bottom: 14px; counter-reset: paso; overflow-x: auto; }

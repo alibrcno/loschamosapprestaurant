@@ -12,9 +12,9 @@ export const POST = ruta(async (req) => {
     const desde = await cuentaId(db, b.desde), hacia = await cuentaId(db, b.hacia);
     const c = leerObs(b.concepto, 100) || 'Traslado';
     const t = await turnoActual(db);
-    const enCaja = t && !t.caja_cerrada_en;
+    const enCaja = !!t && !!t.caja_abierta_en && !t.caja_cerrada_en;
     if (!enCaja && !puede(u, 'reportes.ver')) throw new ErrorApi(409, 'La caja está cerrada');
-    const base = { shiftId: enCaja ? t.id : null, tipo: 'traslado', categoria: 'Traslado', grupoId: nuevoGrupo() };
+    const base = { shiftId: enCaja ? t!.id : null, tipo: 'traslado', categoria: 'Traslado', grupoId: nuevoGrupo() };
     await registrar(db, u, { ...base, cuentaId: desde, monto: -monto, concepto: `${c} hacia ${b.hacia}` });
     await registrar(db, u, { ...base, cuentaId: hacia, monto, concepto: `${c} desde ${b.desde}` });
     await auditar(db, u.tenant_id, u.id, 'Traslado', `$${monto.toLocaleString('es-CO')} de ${b.desde} a ${b.hacia}`);

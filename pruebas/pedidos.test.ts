@@ -73,10 +73,26 @@ describe('API: pedidos de varias meseras e impresión en caja', () => {
   });
 
   test('Otra mesera que abre la misma mesa suma a la misma cuenta', async () => {
-    const r = await pedido(mesera2, { accion: 'enviar', lote: randomUUID(), nueva: { tipo: 'mesa', mesa: 2 }, lineas: [{ tipo: 'producto', id: ids.h, qty: 1 }] });
+    const r = await pedido(mesera2, { accion: 'enviar', lote: randomUUID(), nueva: { tipo: 'mesa', mesa: 2 }, lineas: [{ tipo: 'producto', id: ids.h, qty: 1 }], nota: '  Tienen afán  ' });
     assert.equal(r.datos.orden.id, mesa2);
+    assert.equal(r.datos.orden.comandas[1].nota, 'Tienen afán', 'la comanda lleva la nota para cocina');
     assert.equal(r.datos.comanda, 2);
     assert.equal(r.datos.orden.lineas.length, 4);
+  });
+
+  test('Extras por categoría: los elige la mesera y el precio lo pone el servidor', async () => {
+    assert.equal((await llamar('catalogo/categorias', 'PATCH', { nombre: 'Hamburguesas', extras: [{ nombre: 'Queso extra', precio: 3000 }] }, enc)).status, 403, 'solo quien edita el menú');
+    assert.equal((await llamar('catalogo/categorias', 'PATCH', { nombre: 'Hamburguesas', extras: [{ nombre: 'Queso extra', precio: 3000.5 }] }, admin)).status, 400);
+    assert.equal((await llamar('catalogo/categorias', 'PATCH', { nombre: 'Hamburguesas', extras: [{ nombre: 'Queso extra', precio: 3000 }, { nombre: 'Tocineta', precio: 4000 }] }, admin)).status, 200);
+    assert.deepEqual((await llamar('catalogo', 'GET', undefined, mesera1)).datos.extras.Hamburguesas.map((x: any) => x.precio), [3000, 4000]);
+    const lote = randomUUID();
+    assert.equal((await pedido(mesera1, { accion: 'enviar', lote, nueva: { tipo: 'mesa', mesa: 7 }, lineas: [{ tipo: 'producto', id: ids.h, qty: 1, extras: ['Caviar'] }] })).status, 409);
+    const r = await pedido(mesera1, { accion: 'enviar', lote, nueva: { tipo: 'mesa', mesa: 7 }, lineas: [{ tipo: 'producto', id: ids.h, qty: 2, extras: ['Queso extra', 'Tocineta'] }] });
+    const l = r.datos.orden.lineas[0];
+    assert.deepEqual([l.precio, l.detalle], [22000, 'Con Queso extra, Tocineta'], '15.000 + 3.000 + 4.000');
+    // La mesa 7 se anula para no cambiar las cuentas de las demás pruebas
+    await pedido(enc, { accion: 'anular', orden: r.datos.orden.id, linea: l.lid, motivo: 'prueba de extras' });
+    await pedido(enc, { accion: 'liberar', orden: r.datos.orden.id });
   });
 
   test('Datos inválidos se rechazan', async () => {
@@ -87,7 +103,7 @@ describe('API: pedidos de varias meseras e impresión en caja', () => {
     assert.equal((await pedido(mesera1, { ...base, lote: randomUUID(), lineas: [{ tipo: 'domicilio', monto: 3000, qty: 1 }] })).status, 400, 'el domicilio solo en domicilios');
     assert.equal((await pedido(mesera1, { ...base, nueva: { tipo: 'mesa', mesa: 99 }, lote: randomUUID(), lineas: [{ tipo: 'bebida', id: ids.c, qty: 1 }] })).status, 400, 'mesa que no existe');
     assert.equal((await pedido(cocina, { ...base, lote: randomUUID(), lineas: [{ tipo: 'bebida', id: ids.c, qty: 1 }] })).status, 403, 'cocina no toma pedidos');
-    assert.equal((await llamar('pedidos', 'GET', undefined, enc)).datos.ordenes.length, 1, 'no quedó ninguna cuenta a medias');
+    assert.equal((await llamar('pedidos', 'GET', undefined, enc)).datos.ordenes.length, 2, 'no quedó ninguna cuenta a medias (la mesa 2 y la 7, ya liberada)');
   });
 
   test('Quitar: solo lo que no fue a cocina y no salió en la pre-cuenta', async () => {
@@ -122,7 +138,10 @@ describe('API: pedidos de varias meseras e impresión en caja', () => {
   test('Cada equipo pide solo lo que cambió', async () => {
     const primero = await llamar('pedidos', 'GET', undefined, mesera2);
     const desde = encodeURIComponent(primero.datos.hasta);
-    const d = await pedido(mesera2, { accion: 'enviar', lote: randomUUID(), nueva: { tipo: 'domicilio', cliente: 'Carlos', direccion: 'Cra 9 # 10-20', telefono: '300' }, lineas: [{ tipo: 'domicilio', monto: 3000, qty: 1 }, { tipo: 'bebida', id: ids.c, qty: 1 }] });
+    const dom = { tipo: 'domicilio', cliente: 'Carlos', direccion: 'Cra 9 # 10-20', telefono: '300' };
+    assert.equal((await pedido(mesera2, { accion: 'enviar', lote: randomUUID(), nueva: dom, lineas: [{ tipo: 'bebida', id: ids.c, qty: 1 }] })).status, 400, 'el domicilio dice cómo paga el cliente');
+    const d = await pedido(mesera2, { accion: 'enviar', lote: randomUUID(), nueva: { ...dom, pagoCliente: 'Nequi' }, lineas: [{ tipo: 'domicilio', monto: 3000, qty: 1 }, { tipo: 'bebida', id: ids.c, qty: 1 }] });
+    assert.equal(d.datos.orden.pagoCliente, 'Nequi');
     assert.equal(d.datos.comanda, null, 'sin nada para cocina no hay comanda');
     const cambios = await llamar(`pedidos?desde=${desde}`, 'GET', undefined, mesera2);
     assert.ok(cambios.datos.ordenes.some((x: any) => x.id === d.datos.orden.id));
@@ -153,6 +172,7 @@ describe('API: pedidos de varias meseras e impresión en caja', () => {
     assert.equal(r.datos.orden.estado, 'pagada');
     assert.equal(r.datos.orden.cambio, 5000);
     assert.equal(r.datos.orden.cobradoPor, 'Encargada F');
+    assert.ok(r.datos.orden.comandas.every((c: any) => c.estado === 'entregado'), 'al cobrar, sus comandas salen de la pantalla de cocina');
     assert.deepEqual([r.datos.estado.saldos.Nequi, r.datos.estado.saldos.Efectivo], [30000, 35000]);
     assert.equal((await pedido(enc, { ...base, pagos: [{ cuenta: 'Nequi', monto: 30000 }, { cuenta: 'Efectivo', monto: 35000 }] })).status, 409, 'ya se cobró');
   });
@@ -161,31 +181,57 @@ describe('API: pedidos de varias meseras e impresión en caja', () => {
     assert.equal((await pedido(mesera1, { accion: 'domicilio', orden: (await llamar('pedidos', 'GET', undefined, mesera1)).datos.ordenes.find((o: any) => o.tipo === 'domicilio').id })).status, 201);
     assert.equal((await llamar('impresion', 'POST', { accion: 'tomar' }, mesera1)).status, 403, 'solo quien cobra atiende la impresora');
     const r = await llamar('impresion', 'POST', { accion: 'tomar' }, enc);
-    assert.deepEqual(r.datos.trabajos.map((j: any) => j.tipo), ['comanda', 'comanda', 'precuenta', 'recibo', 'domicilio']);
+    assert.deepEqual(r.datos.trabajos.map((j: any) => j.tipo), ['comanda', 'comanda', 'comanda', 'precuenta', 'recibo', 'domicilio']);
     assert.match(r.datos.trabajos[0].titulo, /^Comanda #1 · Mesa 2 #001/);
     assert.equal(r.datos.trabajos[0].pidio, 'Ana');
     assert.equal(r.datos.trabajos[0].datos.comanda.lids.length, 2, 'la comanda trae solo lo de ese envío');
-    assert.equal(r.datos.trabajos[3].datos.orden.pagos.length, 2, 'el recibo trae los pagos');
+    assert.equal(r.datos.trabajos[4].datos.orden.pagos.length, 2, 'el recibo trae los pagos');
     assert.equal((await llamar('impresion', 'POST', { accion: 'tomar' }, enc)).datos.trabajos.length, 0, 'no se imprime dos veces');
-    const re = await llamar('impresion', 'POST', { accion: 'reimprimir', id: r.datos.trabajos[2].id }, enc);
+    const re = await llamar('impresion', 'POST', { accion: 'reimprimir', id: r.datos.trabajos[3].id }, enc);
     assert.equal(re.datos.trabajos[0].tipo, 'precuenta');
-    assert.equal((await llamar('impresion', 'GET', undefined, enc)).datos.trabajos.length, 5);
+    assert.equal((await llamar('impresion', 'GET', undefined, enc)).datos.trabajos.length, 6);
+  });
+
+  test('Almacén del dueño: entra con su precio, sale al stock del día y no se borra', async () => {
+    assert.equal((await llamar('almacen', 'GET', undefined, enc)).status, 403, 'la encargada no ve el almacén');
+    assert.equal((await llamar('almacen', 'POST', { accion: 'entrada', itemId: ids.c, cantidad: 10 }, enc)).status, 403);
+    const e = await llamar('almacen', 'POST', { accion: 'entrada', itemId: ids.c, cantidad: 10, costo: 25000, nota: 'Compra en Makro' }, admin);
+    assert.equal(e.status, 201);
+    let c = e.datos.items.find((x: any) => x.id === ids.c);
+    assert.deepEqual([c.cantidad, c.costo, c.valor], [10, 2500, 25000], 'avalúo: 10 × $2.500');
+    assert.equal((await llamar('almacen', 'POST', { accion: 'salida', itemId: ids.c, cantidad: 11 }, admin)).status, 409, 'no sale más de lo que hay');
+    const s = await llamar('almacen', 'POST', { accion: 'salida', itemId: ids.c, cantidad: 3, nota: 'para la nevera' }, admin);
+    c = s.datos.items.find((x: any) => x.id === ids.c);
+    assert.equal(c.cantidad, 7);
+    const t = await llamar('turno', 'GET', undefined, enc);
+    assert.ok(t.datos.entradas.some((x: any) => x.itemId === ids.c && x.cantidad === 3), 'la salida entra al turno como una llegada');
+    assert.equal((await llamar('almacen', 'POST', { accion: 'ajuste', itemId: ids.c, cantidad: 6 }, admin)).status, 400, 'el ajuste pide motivo');
+    const a = await llamar('almacen', 'POST', { accion: 'ajuste', itemId: ids.c, cantidad: 6, nota: 'Se dañó una' }, admin);
+    assert.equal(a.datos.items.find((x: any) => x.id === ids.c).cantidad, 6);
+    const m = await llamar('almacen', 'POST', { accion: 'minimo', itemId: ids.c, minimo: 12 }, admin);
+    assert.deepEqual(m.datos.bajos.map((x: any) => x.nombre), ['Coca-Cola'], 'aviso: el almacén está bajo su mínimo');
+    assert.deepEqual(m.datos.movimientos.map((x: any) => x.tipo), ['ajuste', 'salida', 'entrada']);
   });
 
   test('No se cierra la caja con cuentas abiertas; lo vendido va al resumen', async () => {
-    const cierre = { bebidas: { [ids.c]: 22 }, utensilios: {}, saldos: { Efectivo: 35000, Nequi: 30000, Bancolombia: 0, 'Datáfono': 0 } };
+    const cierre = { bebidas: { [ids.c]: 25 }, utensilios: {}, saldos: { Efectivo: 35000, Nequi: 30000, Bancolombia: 0, 'Datáfono': 0 } };
     const r = await llamar('turno/cerrar-caja', 'POST', cierre, enc);
     assert.equal(r.status, 409, 'el domicilio sigue abierto');
     const dom = (await llamar('pedidos', 'GET', undefined, enc)).datos.ordenes.find((o: any) => o.tipo === 'domicilio');
-    await pedido(enc, { accion: 'cobrar', orden: dom.id, total: 7000, pagos: [{ cuenta: 'Efectivo', monto: 7000 }] });
-    const ok = await llamar('turno/cerrar-caja', 'POST', { ...cierre, saldos: { ...cierre.saldos, Efectivo: 42000 } }, enc);
+    // El cliente pagó todo por Nequi y al mensajero se le dieron $3.000 del efectivo de la caja
+    const c = await pedido(enc, { accion: 'cobrar', orden: dom.id, total: 7000, pagos: [{ cuenta: 'Nequi', monto: 7000 }] });
+    assert.deepEqual([c.datos.estado.saldos.Nequi, c.datos.estado.saldos.Efectivo], [37000, 32000], 'el envío sale solo del efectivo');
+    const ok = await llamar('turno/cerrar-caja', 'POST', { ...cierre, saldos: { ...cierre.saldos, Efectivo: 32000, Nequi: 37000 } }, enc);
     assert.equal(ok.status, 201);
     const res = ok.datos.turnos.find((t: any) => t.id === ok.datos.turnoId).resumen;
     assert.equal(res.ventas, 72000);
+    assert.equal(res.gastosLista[0].categoria, 'Domiciliario');
     assert.equal(res.ordenesPagadas, 2);
     assert.deepEqual(res.porCategoria, { Hamburguesas: 30000, Pizzas: 31000, Bebidas: 8000, Domicilio: 3000 });
-    assert.equal(res.anulaciones, 2, 'una hamburguesa anulada y una cuenta liberada');
+    assert.equal(res.anulaciones, 4, 'dos hamburguesas anuladas y dos cuentas liberadas');
     assert.equal(res.bebidas[0].pos, 2);
     assert.equal(res.bebidas[0].dif, 0, 'salieron 2 Coca-Cola del inventario y se cobraron 2');
+    assert.equal(res.bebidas[0].ent, 3, 'las 3 que salieron del almacén cuentan como llegada');
+    assert.equal(res.bebidas[0].almacen, 6, 'el resumen dice cuántas hay en el almacén');
   });
 });

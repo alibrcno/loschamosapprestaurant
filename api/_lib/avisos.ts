@@ -6,6 +6,7 @@
 // A quién se envía lo guarda cada negocio en tenants.config.avisos (chat de Telegram y correo).
 // Si un aviso falla, el cierre NO se afecta: solo se anota en el registro del servidor.
 import type { PoolClient } from 'pg';
+import { avaluoAlmacen } from './almacen';
 import { conNegocio } from './db';
 
 const TG = () => process.env.TELEGRAM_API_URL || 'https://api.telegram.org';
@@ -52,7 +53,8 @@ const hora = (d: Date) => d.toLocaleTimeString('es-CO', { hour: 'numeric', minut
 export interface Destinos { telegramChatId?: string; correo?: string }
 
 /** Texto del reporte (el mismo contenido que el WhatsApp de la app, LC.msgCierre). */
-export function textoReporte(negocio: string, t: any, abrio: string, final: boolean, cuentas: string[]): string {
+export interface Extra { almacen?: { total: number; bajos: { nombre: string; cantidad: number; minimo: number; unidad: string }[] }; semana?: { desde: string; turnos: number; ventas: number; utilidad: number } }
+export function textoReporte(negocio: string, t: any, abrio: string, final: boolean, cuentas: string[], extra: Extra = {}): string {
   const r = t.resumen, ci = t.cierre || {}, co = t.cocina_cierre || {};
   const L: string[] = [];
   L.push(final ? `📊 RESULTADO DEL DÍA · ${negocio.toUpperCase()}` : `🔒 CIERRE DE CAJA · ${negocio.toUpperCase()}`);
@@ -84,9 +86,19 @@ export function textoReporte(negocio: string, t: any, abrio: string, final: bool
   }
   if (r.anulaciones) L.push(`⚠️ Anulaciones en el turno: ${r.anulaciones}`);
   if (final) {
+    if ((r.preparar || []).length) L.push('', `🍲 PREPARAR MAÑANA: ${r.preparar.join(', ')}`);
     const comp = r.bebidas.concat(r.utensilios, r.cocinaCerrada ? r.insumos : []).filter((x: any) => x.comprar > 0);
     L.push('', '🛒 COMPRAR PARA MAÑANA');
-    if (comp.length) comp.forEach((x: any) => L.push(`• ${q(x.comprar)} ${x.unidad} de ${x.nombre}`)); else L.push('✅ Todo sobre el stock sugerido');
+    // Si hay en el almacén del dueño, se saca de ahí y solo se compra lo que falte
+    if (comp.length) comp.forEach((x: any) => L.push(x.sacar
+      ? `• ${q(x.comprar)} ${x.unidad} de ${x.nombre}: en el almacén hay ${q(x.almacen)}, saca ${q(x.sacar)}${x.comprar - x.sacar > 0 ? ` y compra ${q(Math.round((x.comprar - x.sacar) * 1000) / 1000)}` : ' (no hay que comprar)'}`
+      : `• ${q(x.comprar)} ${x.unidad} de ${x.nombre}`));
+    else L.push('✅ Todo sobre el stock sugerido');
+    if (extra.almacen) {
+      L.push('', `📦 ALMACÉN: avalúo ${fmt(extra.almacen.total)}`);
+      extra.almacen.bajos.forEach((x) => L.push(`• ⚠️ ${x.nombre}: quedan ${q(x.cantidad)} ${x.unidad} (mínimo ${q(x.minimo)})`));
+    }
+    if (extra.semana) L.push('', `📅 SEMANA (desde el martes ${extra.semana.desde}): ${extra.semana.turnos} turnos, ventas ${fmt(extra.semana.ventas)}, utilidad ${fmt(extra.semana.utilidad)}`);
   }
   L.push('', `👥 ${r.personal.map((p: any) => `${p.nombre} (${p.area})`).join(', ')}`);
   if (ci.obs) L.push('', `📝 Caja: ${ci.obs}`);
@@ -113,6 +125,43 @@ export async function enviarATodos(d: Destinos, asunto: string, texto: string): 
   return { telegram: telegramR, correo: correoR };
 }
 
+/** Reporte de apertura de caja (antes se mandaba por WhatsApp desde el equipo de la encargada). */
+export function textoApertura(negocio: string, t: any, abrio: string, cuentas: string[], items: Record<string, string>, personal: string[]): string {
+  const a = t.apertura || {}, L: string[] = [];
+  const cc = a.cocina;
+  L.push(`🟢 APERTURA DE CAJA · ${negocio.toUpperCase()}`);
+  L.push(`📅 ${fechaLarga(new Date(t.caja_abierta_en || t.abierto_en))}, ${hora(new Date(t.caja_abierta_en || t.abierto_en))}`);
+  L.push(`👤 Abre la caja: ${abrio}${cc ? ` (cocina abrió a las ${hora(new Date(cc.en))}, ${cc.por})` : ''}`);
+  L.push(`👥 Personal: ${personal.join(', ')}`, '', '💵 Saldos al abrir');
+  cuentas.forEach((c) => {
+    const dif = ((a.saldosContados || {})[c] || 0) - ((a.saldosSistema || {})[c] || 0);
+    L.push(`• ${c}: ${fmt((a.saldosContados || {})[c] || 0)}${dif ? ` ⚠️ dif. ${dif > 0 ? '+' : ''}${fmt(dif)}` : ''}`);
+  });
+  const difs = ['bebidas', 'utensilios'].flatMap((g) => Object.entries(((a.difInv || {})[g] || {}) as Record<string, number>)
+    .map(([id, d]) => `• ${items[id] || 'Producto'}: ${d > 0 ? '+' : ''}${q(d)} frente al sistema`));
+  L.push('', difs.length ? '⚠️ Diferencias en el conteo de bebidas y utensilios' : '✅ Bebidas y utensilios cuadran con el sistema');
+  difs.forEach((x) => L.push(x));
+  if (a.nota) L.push('', `📝 ${a.nota}`);
+  return L.join('\n');
+}
+
+export async function avisarApertura(tenantId: string, turnoId: string) {
+  try {
+    const { negocio, destinos, texto, fecha } = await conNegocio(tenantId, async (db) => {
+      const t = (await db.query('SELECT s.*, u.nombre AS abrio FROM shifts s JOIN users u ON u.id = s.caja_abierta_por WHERE s.id = $1', [turnoId])).rows[0];
+      const { negocio, destinos } = await leerDestinos(db);
+      const cuentas = (await db.query('SELECT nombre FROM accounts WHERE activo ORDER BY orden, nombre')).rows.map((x) => x.nombre);
+      const items = Object.fromEntries((await db.query('SELECT id, nombre FROM inventory_items')).rows.map((x) => [x.id, x.nombre]));
+      const personal = (await db.query('SELECT nombre, area FROM shift_staff WHERE shift_id = $1 ORDER BY nombre', [turnoId])).rows.map((p) => `${p.nombre} (${p.area})`);
+      return { negocio, destinos, texto: textoApertura(negocio, t, t.abrio, cuentas, items, personal), fecha: fechaLarga(new Date(t.abierto_en)) };
+    });
+    return await enviarATodos(destinos, `Apertura de caja · ${negocio} · ${fecha}`, texto);
+  } catch (e) {
+    console.error('No se pudo preparar el aviso de apertura:', e instanceof Error ? e.message : e);
+    return { telegram: 'error', correo: 'error' };
+  }
+}
+
 /**
  * Aviso del cierre. Se llama DESPUÉS de guardar el cierre (fuera de la transacción), para que un
  * problema con Telegram o el correo nunca impida cerrar.
@@ -125,7 +174,19 @@ export async function avisarCierre(tenantId: string, turnoId: string, final: boo
       const t = (await db.query('SELECT s.*, u.nombre AS abrio FROM shifts s JOIN users u ON u.id = s.abierto_por WHERE s.id = $1', [turnoId])).rows[0];
       const { negocio, destinos } = await leerDestinos(db);
       const cuentas = (await db.query('SELECT nombre FROM accounts WHERE activo ORDER BY orden, nombre')).rows.map((x) => x.nombre);
-      return { negocio, destinos, texto: textoReporte(negocio, t, t.abrio, final, cuentas), fecha: fechaLarga(new Date(t.abierto_en)) };
+      const extra: Extra = {};
+      if (final) {
+        const a = await avaluoAlmacen(db);
+        if (a.total || a.bajos.length) extra.almacen = { total: a.total, bajos: a.bajos };
+        // La semana del negocio va de martes a lunes (el lunes se cierra la semana)
+        const s = (await db.query(
+          `WITH d AS (SELECT $1::date - ((extract(isodow FROM $1::date)::int + 5) % 7) AS martes)
+           SELECT to_char(d.martes, 'DD/MM') AS desde, count(*) AS turnos, coalesce(sum((resumen->>'ventas')::bigint), 0) AS ventas,
+                  coalesce(sum((resumen->>'utilidad')::numeric), 0) AS utilidad
+           FROM shifts, d WHERE cerrado_en IS NOT NULL AND dia BETWEEN d.martes AND $1::date GROUP BY d.martes`, [t.dia])).rows[0];
+        if (s) extra.semana = { desde: s.desde, turnos: Number(s.turnos), ventas: Number(s.ventas), utilidad: Number(s.utilidad) };
+      }
+      return { negocio, destinos, texto: textoReporte(negocio, t, t.abrio, final, cuentas, extra), fecha: fechaLarga(new Date(t.abierto_en)) };
     });
     return await enviarATodos(destinos, `${final ? 'Resultado del día' : 'Cierre de caja'} · ${negocio} · ${fecha}`, texto);
   } catch (e) {

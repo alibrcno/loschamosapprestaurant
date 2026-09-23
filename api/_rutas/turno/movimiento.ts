@@ -16,10 +16,10 @@ export const POST = ruta(async (req) => {
     const monto = pesos(b.monto, 'El valor', { min: 1 });
     const concepto = texto(b.concepto, 'el concepto', { max: 120 });
     const t = await turnoActual(db);
-    const enCaja = t && !t.caja_cerrada_en;
+    const enCaja = !!t && !!t.caja_abierta_en && !t.caja_cerrada_en;
     if (!enCaja && !puede(u, 'reportes.ver')) throw new ErrorApi(409, 'La caja está cerrada');
     const cuenta = await cuentaId(db, b.cuenta);
-    await registrar(db, u, { shiftId: enCaja ? t.id : null, cuentaId: cuenta, tipo: b.tipo, monto: gasto ? -monto : monto, concepto, categoria });
+    await registrar(db, u, { shiftId: enCaja ? t!.id : null, cuentaId: cuenta, tipo: b.tipo, monto: gasto ? -monto : monto, concepto, categoria });
     await auditar(db, u.tenant_id, u.id, gasto ? 'Gasto registrado' : 'Ingreso registrado', `${concepto} $${monto.toLocaleString('es-CO')} (${b.cuenta})`);
     return leerEstado(db, u);
   });

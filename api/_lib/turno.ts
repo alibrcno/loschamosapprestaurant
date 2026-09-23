@@ -7,6 +7,7 @@ import { Usuario, puede } from './auth';
 import { cantidad } from './catalogo';
 import { ErrorApi, pesos, texto } from './http';
 import { ventasDelTurno } from './pedidos';
+import { existenciasAlmacen } from './almacen';
 
 export const AREAS = ['Cocina', 'Salón', 'Caja', 'Domicilios'];
 export const CAT_GASTO = ['Compra de inventario', 'Nómina', 'Domiciliario', 'Servicios públicos', 'Arriendo', 'Mantenimiento', 'Otros'];
@@ -16,7 +17,7 @@ const num = (v: unknown) => Number(v) || 0;
 
 /* ---------------- turno actual ---------------- */
 export interface Turno {
-  id: string; tenant_id: string; abierto_en: Date; abierto_por: string; caja_cerrada_en: Date | null;
+  id: string; tenant_id: string; abierto_en: Date; abierto_por: string; caja_abierta_en: Date | null; caja_abierta_por: string | null; caja_cerrada_en: Date | null;
   cerrado_en: Date | null; seq_orden: number; seq_comanda: number;
   apertura: any; cierre: any; cocina_cierre: any; resumen: any;
 }
@@ -28,6 +29,13 @@ export async function turnoActual(db: PoolClient, bloquear = false): Promise<Tur
 }
 export function exigirCajaAbierta(t: Turno | null): Turno {
   if (!t) throw new ErrorApi(409, 'La caja está cerrada. Primero hay que abrirla.');
+  if (!t.caja_abierta_en) throw new ErrorApi(409, 'Cocina ya abrió, pero la encargada todavía no abre la caja.');
+  if (t.caja_cerrada_en) throw new ErrorApi(409, 'La caja de este turno ya se cerró. Solo falta el inventario de cocina.');
+  return t;
+}
+/** Turno abierto (por cocina o por la encargada) cuya caja todavía no se ha cerrado. */
+export function exigirTurnoActivo(t: Turno | null): Turno {
+  if (!t) throw new ErrorApi(409, 'No hay turno abierto. Cocina lo abre desde las 2 p. m. o la encargada al abrir la caja.');
   if (t.caja_cerrada_en) throw new ErrorApi(409, 'La caja de este turno ya se cerró. Solo falta el inventario de cocina.');
   return t;
 }
@@ -121,10 +129,18 @@ export async function calcularResumen(db: PoolClient, t: Turno) {
 
   const items = (await db.query('SELECT id, tipo, nombre, unidad, precio, costo, sugerido FROM inventory_items WHERE activo ORDER BY nombre')).rows;
   const ent: Record<string, number> = Object.fromEntries((await db.query(
-    `SELECT item_id, sum(cantidad) AS n FROM inventory_entries WHERE shift_id = $1 AND motivo = 'llegada' GROUP BY item_id`, [t.id]
+    `SELECT item_id, sum(cantidad) AS n FROM inventory_entries WHERE shift_id = $1 AND motivo IN ('llegada', 'almacen') GROUP BY item_id`, [t.id]
   )).rows.map((x) => [x.item_id, num(x.n)]));
   const ap = t.apertura || {}, ci = t.cierre || null;
   const co = t.cocina_cierre && !t.cocina_cierre.sinInventario ? t.cocina_cierre : null;
+  // Lo que cocina marcó para preparar mañana (salsa, guiso…): sus materiales se suman a lo que hay que tener
+  const preparar: string[] = (co && co.preparar) || [];
+  const config = (await db.query('SELECT config FROM tenants')).rows[0].config || {};
+  const prep: Record<string, number> = {};
+  const almacen = await existenciasAlmacen(db);
+  for (const p of (config.preparaciones || []) as { nombre: string; materiales: { itemId: string; cantidad: number }[] }[]) {
+    if (preparar.includes(p.nombre)) for (const m of p.materiales) prep[m.itemId] = (prep[m.itemId] || 0) + num(m.cantidad);
+  }
 
   const inv = (tipo: string, iniMap: any, finMap: any, posMap: any) =>
     items.filter((it) => it.tipo === tipo).map((it) => {
@@ -134,8 +150,12 @@ export async function calcularResumen(db: PoolClient, t: Turno) {
       const row: any = {
         id: it.id, nombre: it.nombre, unidad: it.unidad, ini, ent: e, fin, consumo,
         costo: consumo === null ? 0 : Math.max(0, consumo) * num(it.costo),
-        sugerido: num(it.sugerido), comprar: fin === null ? null : Math.max(0, num(it.sugerido) - fin)
+        sugerido: num(it.sugerido), preparacion: prep[it.id] || 0,
+        comprar: fin === null ? null : Math.round(Math.max(0, num(it.sugerido) + (prep[it.id] || 0) - fin) * 1000) / 1000
       };
+      // ¿Hay en el almacén del dueño? Se saca de ahí y solo se compra lo que falte
+      row.almacen = Math.round((almacen[it.id] || 0) * 1000) / 1000;
+      row.sacar = row.comprar ? Math.min(row.comprar, Math.max(0, row.almacen)) : 0;
       if (tipo === 'bebida') {
         row.precio = num(it.precio); row.pos = num(posMap[it.id]);
         row.valor = consumo === null ? 0 : consumo * row.precio;
@@ -158,7 +178,7 @@ export async function calcularResumen(db: PoolClient, t: Turno) {
     bebidas, utensilios, insumos, ventaBebidasConteo: sum(bebidas, 'valor'),
     costoBebidas, costoUtensilios, costoInsumos, costoConsumo, cocinaCerrada: !!co,
     utilidad: ventas - costoConsumo - gastosOp, flujo: ventas + ingresos - gastos,
-    descuadre: (ci && ci.descuadre) || null, personal
+    descuadre: (ci && ci.descuadre) || null, personal, preparar
   };
 }
 
@@ -189,6 +209,7 @@ export async function leerEstado(db: PoolClient, u: Usuario) {
     if (!dinero) { delete ap.saldosContados; delete ap.saldosSistema; }
     return {
       id: t.id, abiertoEn: t.abierto_en, abiertoPor: nombres[t.abierto_por] || '', estado: t.cerrado_en ? 'cerrado' : 'abierto',
+      cajaAbierta: !!t.caja_abierta_en, cajaAbiertaEn: t.caja_abierta_en, cajaAbiertaPor: nombres[t.caja_abierta_por || ''] || '',
       cajaCerrada: !!t.caja_cerrada_en, cajaCerradaEn: t.caja_cerrada_en, cerradoEn: t.cerrado_en,
       personal: staff.filter((s) => s.shift_id === t.id).map(({ id, nombre, area }) => ({ id, nombre, area })),
       seqOrden: t.seq_orden, seqComanda: t.seq_comanda, apertura: ap,
@@ -208,7 +229,7 @@ export async function leerEstado(db: PoolClient, u: Usuario) {
     `SELECT e.id, e.creado_en AS fecha, e.shift_id AS "turnoId", i.tipo, e.item_id AS "itemId", i.nombre, i.unidad, e.cantidad,
             e.costo_total AS costo, a.nombre AS cuenta, coalesce(e.nota, '') AS nota, coalesce(u.nombre, '') AS usuario
      FROM inventory_entries e JOIN inventory_items i ON i.id = e.item_id LEFT JOIN accounts a ON a.id = e.account_id
-     LEFT JOIN users u ON u.id = e.user_id WHERE e.shift_id = $1 AND e.motivo = 'llegada' ORDER BY e.creado_en`, [actual.id]
+     LEFT JOIN users u ON u.id = e.user_id WHERE e.shift_id = $1 AND e.motivo IN ('llegada', 'almacen') ORDER BY e.creado_en`, [actual.id]
   )).rows.map((e) => ({ ...e, tipo: GRUPO[e.tipo], costo: dinero ? e.costo : 0, cuenta: dinero ? e.cuenta : null })) : [];
 
   return {

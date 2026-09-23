@@ -8,11 +8,14 @@ import * as login from './_rutas/auth/login';
 import * as logout from './_rutas/auth/logout';
 import * as yo from './_rutas/auth/yo';
 import * as catalogo from './_rutas/catalogo/index';
+import * as categorias from './_rutas/catalogo/categorias';
 import * as importar from './_rutas/catalogo/importar';
 import * as inventario from './_rutas/catalogo/inventario';
 import * as negocio from './_rutas/catalogo/negocio';
 import * as pizzas from './_rutas/catalogo/pizzas';
+import * as preparaciones from './_rutas/catalogo/preparaciones';
 import * as productos from './_rutas/catalogo/productos';
+import * as almacen from './_rutas/almacen';
 import * as auditoria from './_rutas/auditoria';
 import * as avisos from './_rutas/avisos';
 import * as equipo from './_rutas/equipo';
@@ -20,6 +23,7 @@ import * as impresion from './_rutas/impresion';
 import * as pedidos from './_rutas/pedidos';
 import * as salud from './_rutas/salud';
 import * as turnoAbrir from './_rutas/turno/abrir';
+import * as turnoAbrirCocina from './_rutas/turno/abrir-cocina';
 import * as turnoAjuste from './_rutas/turno/ajuste';
 import * as turnoCerrarCaja from './_rutas/turno/cerrar-caja';
 import * as turnoCerrarCocina from './_rutas/turno/cerrar-cocina';
@@ -40,11 +44,14 @@ export const RUTAS: Record<string, Modulo> = {
   'auth/logout': logout,
   'auth/yo': yo,
   catalogo,
+  'catalogo/categorias': categorias,
   'catalogo/importar': importar,
   'catalogo/inventario': inventario,
   'catalogo/negocio': negocio,
   'catalogo/pizzas': pizzas,
+  'catalogo/preparaciones': preparaciones,
   'catalogo/productos': productos,
+  almacen,
   auditoria,
   avisos,
   equipo,
@@ -53,6 +60,7 @@ export const RUTAS: Record<string, Modulo> = {
   salud,
   turno: turnoEstado,
   'turno/abrir': turnoAbrir,
+  'turno/abrir-cocina': turnoAbrirCocina,
   'turno/ajuste': turnoAjuste,
   'turno/cerrar-caja': turnoCerrarCaja,
   'turno/cerrar-cocina': turnoCerrarCocina,

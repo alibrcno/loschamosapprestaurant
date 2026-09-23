@@ -108,7 +108,10 @@ describe('Avisos del cierre por Telegram y correo', () => {
   });
 
   test('Al cerrar la caja llega el aviso; al cerrar cocina llega el resultado con la utilidad', async () => {
-    await llamar('turno/abrir', 'POST', { personal: [{ nombre: 'Cocina E', area: 'Cocina' }], bebidas: { [ids.c]: 10 }, utensilios: {}, saldos }, enc);
+    recibidos.length = 0;
+    const ab = await llamar('turno/abrir', 'POST', { personal: [{ nombre: 'Cocina E', area: 'Cocina' }], bebidas: { [ids.c]: 10 }, utensilios: {}, saldos }, enc);
+    assert.deepEqual(ab.datos.avisos, { telegram: 'enviado', correo: 'enviado' }, 'la apertura ya no va por WhatsApp: la envía el servidor');
+    assert.match(recibidos.find((x) => x.canal === 'telegram')!.datos.text, /APERTURA DE CAJA · CHAMOS E[\s\S]*Personal: Cocina E \(Cocina\)/);
     const o = (await llamar('pedidos', 'POST', { accion: 'enviar', lote: randomUUID(), nueva: { tipo: 'mesa', mesa: 1 }, lineas: [{ tipo: 'bebida', id: ids.c, qty: 2 }] }, enc)).datos.orden;
     await llamar('pedidos', 'POST', { accion: 'cobrar', orden: o.id, total: 8000, pagos: [{ cuenta: 'Efectivo', monto: 8000 }] }, enc);
     recibidos.length = 0;
@@ -131,6 +134,7 @@ describe('Avisos del cierre por Telegram y correo', () => {
     assert.match(tg2, /RESULTADO DEL DÍA · CHAMOS E/);
     assert.match(tg2, /UTILIDAD ESTIMADA: -\$7\.200/);
     assert.match(tg2, /inventario de cocina Cocina E/);
+    assert.match(tg2, /SEMANA \(desde el martes \d\d\/\d\d\): 1 turnos, ventas \$8\.000/, 'el reporte final trae cómo va la semana');
     assert.match(recibidos.find((x) => x.canal === 'correo')!.datos.subject, /^Resultado del día · Chamos E/);
   });
 

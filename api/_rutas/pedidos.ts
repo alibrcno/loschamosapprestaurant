@@ -1,7 +1,7 @@
 // /api/pedidos  — cuentas de mesa y domicilio, comandas de cocina y cobro
 //   GET  ?desde=<fecha>  → cuentas del turno (solo las que cambiaron desde esa fecha, si se da)
 //   POST { accion, ... } (cada acción revisa su permiso):
-//     enviar     { orden | nueva, lineas, lote }  pos.tomar      → guarda el pedido y crea la comanda
+//     enviar     { orden | nueva, lineas, lote, nota }  pos.tomar → guarda el pedido y crea la comanda (nota general para cocina)
 //     quitar     { orden, linea }                pos.tomar      → quita uno de algo que no va a cocina (antes de la pre-cuenta)
 //     anular     { orden, linea, motivo }        pos.anular     → anula un producto ya enviado o ya en la pre-cuenta
 //     mover      { orden, mesa }                 pos.tomar      → cambia de mesa
@@ -15,9 +15,9 @@ import { auditar, conUsuario } from '../_lib/auth';
 import { esUuid } from '../_lib/db';
 import { ErrorApi, json, leerJson, pesos, ruta, texto } from '../_lib/http';
 import {
-  encolar, exigir, imprimirComandas, leerLineas, leerNueva, leerOrdenes, numeroMesas, ordenAbierta, siguiente, tituloOrden, tocar, totalOrden
+  encolar, entregarComandas, envioOrden, exigir, imprimirComandas, leerLineas, leerNueva, leerOrdenes, numeroMesas, ordenAbierta, siguiente, tituloOrden, tocar, totalOrden
 } from '../_lib/pedidos';
-import { cuentaId, exigirCajaAbierta, leerEstado, turnoActual } from '../_lib/turno';
+import { cuentaId, cuentas, exigirCajaAbierta, leerEstado, turnoActual } from '../_lib/turno';
 
 const pad3 = (n: number) => String(n || 0).padStart(3, '0');
 const fmt = (n: number) => '$' + Math.round(n).toLocaleString('es-CO');
@@ -34,7 +34,9 @@ export const GET = ruta(async (req) => {
     if (!t) return { turnoId: null, ordenes: [], hasta, impresionPendiente: 0 };
     const pend = (await db.query(
       `SELECT count(*) AS n FROM print_jobs WHERE shift_id = $1 AND impreso_en IS NULL AND creado_en < now() - interval '20 seconds'`, [t.id])).rows[0].n;
-    return { turnoId: t.id, ordenes: await leerOrdenes(db, u, t.id, { desde }), hasta, impresionPendiente: Number(pend) };
+    // Cómo está la caja: si cambió (se abrió o se cerró en otro equipo), la app recarga el turno enseguida
+    const caja = t.caja_cerrada_en ? 'cerrada' : t.caja_abierta_en ? 'abierta' : 'sin abrir';
+    return { turnoId: t.id, caja, ordenes: await leerOrdenes(db, u, t.id, { desde }), hasta, impresionPendiente: Number(pend) };
   }));
 });
 
@@ -58,14 +60,14 @@ export const POST = ruta(async (req) => {
         let o;
         if (b.orden) o = await ordenAbierta(db, t, b.orden);
         else {
-          const n = leerNueva(b.nueva, await numeroMesas(db));
+          const n = leerNueva(b.nueva, await numeroMesas(db), (await cuentas(db)).map((c) => c.nombre));
           // Si otra mesera ya abrió esa mesa, el pedido se suma a la misma cuenta
           if (n.tipo === 'mesa') o = (await db.query(`SELECT * FROM orders WHERE shift_id = $1 AND tipo = 'mesa' AND mesa = $2 AND estado = 'abierta' FOR UPDATE`, [t.id, n.mesa])).rows[0];
           if (!o) {
             o = (await db.query(
-              `INSERT INTO orders (tenant_id, shift_id, numero, tipo, mesa, cliente, telefono, direccion, nota, mesero_id)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-              [u.tenant_id, t.id, await siguiente(db, t.id, 'seq_orden'), n.tipo, n.mesa, n.cliente, n.telefono, n.direccion, n.nota, u.id])).rows[0];
+              `INSERT INTO orders (tenant_id, shift_id, numero, tipo, mesa, cliente, telefono, direccion, nota, mesero_id, pago_cliente)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+              [u.tenant_id, t.id, await siguiente(db, t.id, 'seq_orden'), n.tipo, n.mesa, n.cliente, n.telefono, n.direccion, n.nota, u.id, n.pagoCliente])).rows[0];
           }
         }
         const lineas = await leerLineas(db, b.lineas, o.tipo);
@@ -73,7 +75,8 @@ export const POST = ruta(async (req) => {
         let comanda: number | null = null, ticketId: string | null = null;
         if (cocina) {
           comanda = await siguiente(db, t.id, 'seq_comanda');
-          ticketId = (await db.query('INSERT INTO kitchen_tickets (tenant_id, order_id, numero, user_id) VALUES ($1, $2, $3, $4) RETURNING id', [u.tenant_id, o.id, comanda, u.id])).rows[0].id;
+          const nota = typeof b.nota === 'string' && b.nota.trim() ? b.nota.trim().slice(0, 200) : null;
+          ticketId = (await db.query('INSERT INTO kitchen_tickets (tenant_id, order_id, numero, user_id, nota) VALUES ($1, $2, $3, $4, $5) RETURNING id', [u.tenant_id, o.id, comanda, u.id, nota])).rows[0].id;
         }
         for (const l of lineas) {
           await db.query(
@@ -134,6 +137,7 @@ export const POST = ruta(async (req) => {
         const orden = (await leerOrdenes(db, u, t.id, { ids: [o.id] }))[0];
         if (totalOrden(orden) !== 0) throw new ErrorApi(409, 'La cuenta tiene productos por cobrar. Cóbrala o anula los productos.');
         await db.query(`UPDATE orders SET estado = 'anulada', cerrado_en = now(), actualizado_en = now() WHERE id = $1`, [o.id]);
+        await entregarComandas(db, o.id);
         await auditar(db, u.tenant_id, u.id, 'Cuenta liberada sin cobro', tituloOrden(o));
         return devolver(o.id);
       }
@@ -187,9 +191,19 @@ export const POST = ruta(async (req) => {
           await db.query('INSERT INTO payments (tenant_id, order_id, account_id, monto, ledger_id, user_id) VALUES ($1, $2, $3, $4, $5, $6)',
             [u.tenant_id, o.id, p.cuentaId, p.monto, l.id, u.id]);
         }
+        // Domicilio: el envío se le paga al mensajero en efectivo de la caja, así pague el cliente por transferencia.
+        // Se resta solo del efectivo para que la caja cuadre al cierre.
+        const envio = o.tipo === 'domicilio' ? envioOrden(orden) : 0;
+        if (envio > 0) {
+          await db.query(
+            `INSERT INTO ledger_entries (tenant_id, shift_id, account_id, tipo, monto, concepto, categoria, ref_id, user_id)
+             VALUES ($1, $2, $3, 'gasto', $4, $5, 'Domiciliario', $6, $7)`,
+            [u.tenant_id, t.id, await cuentaId(db, 'Efectivo'), -envio, `Envío al mensajero, ${concepto}`, o.id, u.id]);
+        }
         await db.query(
           `UPDATE orders SET estado = 'pagada', cerrado_en = now(), cobrado_por = $2, recibido = $3, cambio = $4, actualizado_en = now() WHERE id = $1`,
           [o.id, u.id, recibido, recibido - efectivo]);
+        await entregarComandas(db, o.id);
         const res = await devolver(o.id);
         if (b.imprimir) await encolar(db, u, res.orden, 'recibo');
         return { ...res, estado: await leerEstado(db, u) };

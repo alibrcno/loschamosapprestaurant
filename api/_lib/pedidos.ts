@@ -48,7 +48,7 @@ export async function leerOrdenes(db: PoolClient, u: Usuario, shiftId: string, f
     id: o.id, turnoId: o.shift_id, numero: o.numero, tipo: o.tipo, mesa: o.mesa,
     cliente: o.cliente, telefono: o.telefono, direccion: o.direccion, nota: o.nota,
     estado: o.estado, creadaEn: o.creado_en, cerradaEn: o.cerrado_en, mesero: o.mesero || '',
-    precuentaEn: o.precuenta_en, cobradoPor: o.cobrador || null, recibido: num(o.recibido), cambio: num(o.cambio),
+    precuentaEn: o.precuenta_en, pagoCliente: o.pago_cliente || null, cobradoPor: o.cobrador || null, recibido: num(o.recibido), cambio: num(o.cambio),
     actualizadoEn: o.actualizado_en,
     lineas: items.rows.filter((l) => l.order_id === o.id).map((l) => ({
       lid: l.id, pid: l.product_id, bebidaId: l.inventory_item_id, nombre: l.nombre, categoria: l.categoria || '',
@@ -57,7 +57,7 @@ export async function leerOrdenes(db: PoolClient, u: Usuario, shiftId: string, f
       anulada: l.anulada ? { por: l.anulo || '', motivo: l.anulada_motivo, en: l.anulada_en } : null
     })),
     comandas: tickets.rows.filter((k) => k.order_id === o.id).map((k) => ({
-      id: k.id, num: k.numero, en: k.creado_en, estado: k.estado, por: k.por || '', listoEn: k.listo_en, entregadoEn: k.entregado_en,
+      id: k.id, num: k.numero, en: k.creado_en, estado: k.estado, por: k.por || '', nota: k.nota || '', listoEn: k.listo_en, entregadoEn: k.entregado_en,
       lids: items.rows.filter((l) => l.ticket_id === k.id).map((l) => l.id)
     })),
     pagos: pagos.rows.filter((p) => p.order_id === o.id).map((p) => ({ cuenta: p.cuenta, monto: num(p.monto) }))
@@ -65,6 +65,8 @@ export async function leerOrdenes(db: PoolClient, u: Usuario, shiftId: string, f
 }
 export type Orden = Awaited<ReturnType<typeof leerOrdenes>>[number];
 export const totalOrden = (o: Orden) => o.lineas.filter((l) => !l.anulada).reduce((a, l) => a + l.precio * l.qty, 0);
+/** Valor del envío de un domicilio (lo que se le paga al mensajero). */
+export const envioOrden = (o: Orden) => o.lineas.filter((l) => !l.anulada && l.categoria === 'Domicilio').reduce((a, l) => a + l.precio * l.qty, 0);
 
 /** La cuenta, bloqueada para cambiarla. Debe ser del turno actual y seguir abierta. */
 export async function ordenAbierta(db: PoolClient, t: Turno, id: unknown) {
@@ -75,6 +77,10 @@ export async function ordenAbierta(db: PoolClient, t: Turno, id: unknown) {
   return o;
 }
 export const tocar = (db: PoolClient, orderId: string) => db.query('UPDATE orders SET actualizado_en = now() WHERE id = $1', [orderId]);
+/** Al cobrar o cerrar una cuenta sus comandas salen de la pantalla de cocina, aunque cocina no las haya marcado. */
+export const entregarComandas = (db: PoolClient, orderId: string) => db.query(
+  `UPDATE kitchen_tickets SET estado = 'entregado', entregado_en = now(), listo_en = coalesce(listo_en, now())
+   WHERE order_id = $1 AND estado <> 'entregado'`, [orderId]);
 
 /* ---------------- productos que manda la mesera: se validan contra el menú ---------------- */
 export interface LineaNueva {
@@ -96,10 +102,22 @@ export async function leerLineas(db: PoolClient, v: unknown, tipoOrden: string):
     const qty = cantidadEntera(x.qty), obs = obsDe(x.obs);
     if (x.tipo === 'producto') {
       const p = esUuid(x.id) ? (await db.query(
-        `SELECT p.id, p.nombre, p.precio, p.sin_cocina, c.nombre AS categoria FROM products p
+        `SELECT p.id, p.nombre, p.precio, p.sin_cocina, c.nombre AS categoria, c.extras FROM products p
          LEFT JOIN categories c ON c.id = p.category_id WHERE p.id = $1 AND p.activo`, [x.id])).rows[0] : null;
       if (!p) throw new ErrorApi(409, 'Un producto del pedido ya no está en el menú. Recarga y vuelve a agregarlo.');
-      r.push({ productId: p.id, itemId: null, nombre: p.nombre, categoria: p.categoria || 'Otros', detalle: '', obs, precio: num(p.precio), qty, sinCocina: p.sin_cocina });
+      // Extras de la categoría (queso extra, tocineta…): el precio sale del menú del servidor
+      const pedidos = x.extras === undefined ? [] : x.extras;
+      if (!Array.isArray(pedidos) || pedidos.length > 30) throw new ErrorApi(400, 'Los extras no son válidos');
+      const extras = [...new Set(pedidos as unknown[])].map((nom) => {
+        const e = ((p.extras || []) as { nombre: string; precio: number }[]).find((y) => y.nombre === nom);
+        if (!e) throw new ErrorApi(409, `El extra "${String(nom)}" ya no está en el menú. Recarga y vuelve a agregarlo.`);
+        return e;
+      });
+      r.push({
+        productId: p.id, itemId: null, nombre: p.nombre, categoria: p.categoria || 'Otros', obs, qty, sinCocina: p.sin_cocina,
+        detalle: extras.length ? 'Con ' + extras.map((e) => e.nombre).join(', ') : '',
+        precio: num(p.precio) + extras.reduce((a, e) => a + num(e.precio), 0)
+      });
     } else if (x.tipo === 'bebida') {
       const b = esUuid(x.id) ? (await db.query(`SELECT id, nombre, precio FROM inventory_items WHERE id = $1 AND tipo = 'bebida' AND activo`, [x.id])).rows[0] : null;
       if (!b || b.precio === null) throw new ErrorApi(409, 'Una bebida del pedido ya no está a la venta. Recarga y vuelve a agregarla.');
@@ -127,18 +145,19 @@ export async function leerLineas(db: PoolClient, v: unknown, tipoOrden: string):
 }
 
 /** Datos de una cuenta nueva: mesa, o domicilio con cliente y dirección. */
-export function leerNueva(v: unknown, mesas: number) {
+export function leerNueva(v: unknown, mesas: number, cuentas: string[] = []) {
   const n = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
   if (n.tipo === 'mesa') {
     const mesa = n.mesa;
     if (typeof mesa !== 'number' || !Number.isInteger(mesa) || mesa < 1 || mesa > mesas) throw new ErrorApi(400, 'Esa mesa no existe');
-    return { tipo: 'mesa', mesa, cliente: null, telefono: null, direccion: null, nota: null };
+    return { tipo: 'mesa', mesa, cliente: null, telefono: null, direccion: null, nota: null, pagoCliente: null };
   }
   if (n.tipo === 'domicilio') {
     const opc = (x: unknown, max: number) => (typeof x === 'string' && x.trim() ? x.trim().slice(0, max) : null);
     return {
       tipo: 'domicilio', mesa: null, cliente: texto(n.cliente, 'el nombre del cliente', { max: 80 }),
-      telefono: opc(n.telefono, 30), direccion: texto(n.direccion, 'la dirección', { max: 160 }), nota: opc(n.nota, 200)
+      telefono: opc(n.telefono, 30), direccion: texto(n.direccion, 'la dirección', { max: 160 }), nota: opc(n.nota, 200),
+      pagoCliente: (() => { if (!cuentas.includes(n.pagoCliente as string)) throw new ErrorApi(400, 'Indica cómo va a pagar el cliente'); return n.pagoCliente as string; })()
     };
   }
   throw new ErrorApi(400, 'Falta la mesa o los datos del domicilio');

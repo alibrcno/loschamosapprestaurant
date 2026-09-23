@@ -9,7 +9,7 @@
 'use strict';
 (function () {
   const LC = (window.LC = window.LC || {});
-  LC.VERSION = '2.5.0';
+  LC.VERSION = '2.6.0';
   LC.TENANT = 'loschamos'; // en fase 2 viene del login (multi-negocio)
   LC.KEY = 'lc2_' + LC.TENANT;
 
@@ -32,7 +32,8 @@
     'inventario.entradas': 'Registrar llegada de bebidas y utensilios',
     'reportes.ver': 'Ver finanzas y reportes',
     'catalogo.editar': 'Editar menú, precios, costos y stock sugerido',
-    'usuarios.gestionar': 'Crear usuarios y asignar permisos'
+    'usuarios.gestionar': 'Crear usuarios y asignar permisos',
+    'almacen.gestionar': 'Almacén del dueño: entradas, salidas y avalúo'
   };
 
   LC.ROLES = {
@@ -103,8 +104,9 @@
     if (c.vacio) return false; // aún no se ha subido: se sigue usando el menú de este equipo
     const db = LC.db, n = c.negocio, cfg = n.config || {};
     Object.assign(db.config, { negocio: n.nombre, whatsapp: n.whatsapp || '', nit: n.nit || '', direccion: n.direccion || '', telefono: n.telefono || '' });
-    ['mesas', 'ticket', 'valorDomicilio', 'imprimirComandas'].forEach((k) => { if (cfg[k] !== undefined) db.config[k] = cfg[k]; });
+    ['mesas', 'ticket', 'valorDomicilio', 'imprimirComandas', 'preparaciones'].forEach((k) => { if (cfg[k] !== undefined) db.config[k] = cfg[k]; });
     db.categorias = ['Pizzas'].concat(c.categorias, ['Bebidas']);
+    db.extras = c.extras || {}; // extras por categoría: { Hamburguesas: [{ nombre, precio }] }
     db.productos = c.productos.map((p) => ({ id: p.id, categoria: p.categoria || 'Otros', nombre: p.nombre, precio: p.precio, activo: p.activo }));
     db.pizza.tipos = c.pizzas.map((t) => ({ id: t.id, nombre: t.nombre, gratis: t.gratis, precios: t.precios, extra: t.extra, sabores: t.sabores }));
     Object.keys(LC.INV).forEach((g) => (db[g] = c.inventario[g].map((x) => Object.assign({}, x, { stock: LC.num(x.stock) }))));
@@ -255,8 +257,10 @@
   // Turno sin terminar (viene del servidor). Tiene dos momentos:
   //  - caja abierta: se vende y se mueve dinero  → LC.turno()
   //  - caja cerrada por la encargada, esperando el inventario de cocina → solo LC.turnoCocina()
+  //  - antes de eso, cocina puede abrir el turno desde las 2 p. m. (sin caja todavía) → LC.soloCocina()
   LC.turnoCocina = () => LC.db.turnos.find((t) => t.id === LC.db.turnoActualId && t.estado === 'abierto') || null;
-  LC.turno = () => { const t = LC.turnoCocina(); return t && !t.cajaCerrada ? t : null; };
+  LC.turno = () => { const t = LC.turnoCocina(); return t && t.cajaAbierta !== false && !t.cajaCerrada ? t : null; };
+  LC.soloCocina = () => { const t = LC.turnoCocina(); return !!(t && t.cajaAbierta === false); };
   LC.esperandoCocina = () => { const t = LC.turnoCocina(); return !!(t && t.cajaCerrada); };
 
   LC.log = (accion, detalle = '') => {
@@ -306,7 +310,9 @@
     turnoPed = r.turnoId; hasta = r.hasta; LC.impresionPendiente = r.impresionPendiente || 0;
     r.ordenes.forEach((o) => (srv[o.id] = o));
     // Si el turno cambió (se abrió o se cerró la caja en otro equipo), se trae también el turno
-    if ((r.turnoId || null) !== (LC.db.turnoActualId || null)) { try { await LC.cargarTurno(); } catch (e) { console.warn(e); } }
+    const t = LC.turnoCocina();
+    const caja = t ? (t.cajaCerrada ? 'cerrada' : t.cajaAbierta === false ? 'sin abrir' : 'abierta') : undefined;
+    if ((r.turnoId || null) !== (LC.db.turnoActualId || null) || (r.caja && r.caja !== caja)) { try { await LC.cargarTurno(); } catch (e) { console.warn(e); } }
     LC.armarPedidos();
   };
   LC.recibirOrden = (o) => { if (o) srv[o.id] = o; LC.armarPedidos(); };
@@ -362,7 +368,7 @@
     if (l.tipo === 'pizza') return { tipo: 'pizza', id: l.pizza.id, tamano: l.pizza.tam, sabores: l.pizza.sabores, qty: l.qty, obs: l.obs };
     if (l.tipo === 'bebida') return { tipo: 'bebida', id: l.bebidaId, qty: l.qty, obs: l.obs };
     if (l.tipo === 'domicilio') return { tipo: 'domicilio', monto: l.precio, qty: 1 };
-    return { tipo: 'producto', id: l.pid, qty: l.qty, obs: l.obs };
+    return { tipo: 'producto', id: l.pid, qty: l.qty, obs: l.obs, extras: l.extras || [] };
   };
 
   // Manda al servidor todo el borrador de una cuenta. El "lote" identifica este envío: si el internet
@@ -371,7 +377,7 @@
     const d = LC.db.borradores[o.id];
     if (!d || !d.lineas.length) return null;
     if (!d.lote) { d.lote = uuid(); LC.save(); }
-    const body = { accion: 'enviar', lote: d.lote, lineas: d.lineas.map(paraServidor) };
+    const body = { accion: 'enviar', lote: d.lote, lineas: d.lineas.map(paraServidor), nota: d.nota || '' };
     if (o.local) body.nueva = d.nueva; else body.orden = o.id;
     const r = await LC.api('pedidos', { method: 'POST', body });
     delete LC.db.borradores[o.id];
@@ -452,7 +458,11 @@
     const anulaciones = db.ordenes.filter((o) => o.turnoId === t.id)
       .reduce((a, o) => a + o.lineas.filter((l) => l.anulada).length + (o.estado === 'anulada' ? 1 : 0), 0);
 
-    const ap = t.apertura || {}, ci = t.cierre || null, co = (t.cocina && t.cocina.cierre) || null;
+    const ap = t.apertura || {}, ci = t.cierre || null, co0 = (t.cocina && t.cocina.cierre) || null;
+    const co = co0 && !co0.sinInventario ? co0 : null;
+    // Materiales de lo que cocina marcó para preparar mañana (igual que el servidor)
+    const preparar = (co && co.preparar) || [], prep = {};
+    (db.config.preparaciones || []).forEach((p) => { if (preparar.includes(p.nombre)) p.materiales.forEach((m) => (prep[m.itemId] = (prep[m.itemId] || 0) + LC.num(m.cantidad))); });
     const inv = (tipo, iniMap, finMap, posMap) => {
       const ent = LC.entradasTurno(t.id, tipo);
       return db[tipo].map((it) => {
@@ -462,7 +472,8 @@
         const row = {
           id: it.id, nombre: it.nombre, unidad: it.unidad, ini, ent: e, fin, consumo,
           costo: consumo === null ? 0 : Math.max(0, consumo) * LC.num(it.costo),
-          sugerido: LC.num(it.sugerido), comprar: fin === null ? null : Math.max(0, LC.num(it.sugerido) - fin)
+          sugerido: LC.num(it.sugerido), preparacion: prep[it.id] || 0,
+          comprar: fin === null ? null : Math.round(Math.max(0, LC.num(it.sugerido) + (prep[it.id] || 0) - fin) * 1000) / 1000
         };
         if (tipo === 'bebidas') {
           row.precio = LC.num(it.precio); row.pos = LC.num(posMap[it.id]);
@@ -486,7 +497,7 @@
       bebidas, utensilios, insumos, ventaBebidasConteo: sum(bebidas, 'valor'),
       costoBebidas, costoUtensilios, costoInsumos, costoConsumo, cocinaCerrada: !!co,
       utilidad: ventas - costoConsumo - gastosOp, flujo: ventas + ingresos - gastos,
-      descuadre: (ci && ci.descuadre) || null, personal: t.personal || []
+      descuadre: (ci && ci.descuadre) || null, personal: t.personal || [], preparar
     };
   };
 })();

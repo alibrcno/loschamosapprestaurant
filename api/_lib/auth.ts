@@ -8,7 +8,8 @@ import { ErrorApi, leerCookies } from './http';
 /** Los mismos permisos y roles que usa la app (public/store.js). */
 export const PERMISOS = [
   'pos.tomar', 'pos.precuenta', 'pos.cobrar', 'pos.anular', 'cocina.comandas', 'cocina.inventario',
-  'turno.operar', 'caja.movimientos', 'inventario.entradas', 'reportes.ver', 'catalogo.editar', 'usuarios.gestionar'
+  'turno.operar', 'caja.movimientos', 'inventario.entradas', 'reportes.ver', 'catalogo.editar', 'usuarios.gestionar',
+  'almacen.gestionar'
 ] as const;
 export type Permiso = (typeof PERMISOS)[number];
 export const ROLES = ['admin', 'encargada', 'mesera', 'cocina'] as const;

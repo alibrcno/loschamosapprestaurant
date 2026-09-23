@@ -1,5 +1,5 @@
 // POST /api/turno/cerrar-cocina  (permiso cocina.inventario)
-// { conteo: {insumoId: cantidad}, obs }
+// { conteo: {insumoId: cantidad}, obs, preparar: ['Salsa de pizza', ...] }
 // Inventario de cierre de cocina: pesa o cuenta lo que queda. Con esto se sabe cuánto se gastó.
 // Normalmente es el ÚLTIMO paso de la noche: si la caja ya está cerrada, el turno termina aquí y
 // se calcula el resultado del día (ventas − costo de lo consumido − gastos). Si cocina cuenta antes
@@ -17,8 +17,13 @@ export const POST = ruta(async (req) => {
     const insumos = await itemsDe(db, 'insumo');
     const conteo = leerConteo(b.conteo, insumos, 'insumos');
     const obs = leerObs(b.obs);
+    // Qué hay que preparar mañana (lo configura el dueño en Ajustes → Preparaciones)
+    const config = (await db.query('SELECT config FROM tenants')).rows[0].config || {};
+    const nombres = ((config.preparaciones || []) as { nombre: string }[]).map((p) => p.nombre);
+    const preparar = Array.isArray(b.preparar) ? [...new Set(b.preparar as unknown[])] : [];
+    if (preparar.some((p) => !nombres.includes(p as string))) throw new ErrorApi(400, 'Una preparación ya no existe. Recarga la página.');
     await guardarConteo(db, u, t.id, 'cocina_cierre', insumos, conteo);
-    await db.query('UPDATE shifts SET cocina_cierre = $2 WHERE id = $1', [t.id, JSON.stringify({ en: new Date().toISOString(), por: u.nombre, conteo, obs })]);
+    await db.query('UPDATE shifts SET cocina_cierre = $2 WHERE id = $1', [t.id, JSON.stringify({ en: new Date().toISOString(), por: u.nombre, conteo, obs, preparar })]);
     const termino = await actualizarTurno(db, u, t.id);
     await auditar(db, u.tenant_id, u.id, 'Inventario de cierre de cocina', termino ? 'Turno terminado' : 'La caja sigue abierta');
     return { ...(await leerEstado(db, u)), tenantId: u.tenant_id, turnoId: t.id, termino };

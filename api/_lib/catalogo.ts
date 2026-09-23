@@ -49,7 +49,7 @@ export async function idCategoria(db: PoolClient, tenantId: string, nombre: stri
 export async function leerCatalogo(db: PoolClient) {
   const [neg, cats, prods, pizzas, inv] = await Promise.all([
     db.query('SELECT nombre, codigo, nit, direccion, telefono, whatsapp, config FROM tenants'),
-    db.query('SELECT nombre FROM categories ORDER BY orden, nombre'),
+    db.query('SELECT nombre, extras FROM categories ORDER BY orden, nombre'),
     db.query(`SELECT p.id, c.nombre AS categoria, p.nombre, p.precio, p.activo
               FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY c.orden, p.nombre`),
     db.query('SELECT id, nombre, precios, extra, gratis, sabores FROM pizza_types WHERE activo ORDER BY orden, nombre'),
@@ -60,6 +60,7 @@ export async function leerCatalogo(db: PoolClient) {
   return {
     negocio: neg.rows[0],
     categorias: cats.rows.map((c) => c.nombre as string),
+    extras: Object.fromEntries(cats.rows.filter((c) => c.extras && c.extras.length).map((c) => [c.nombre, c.extras])) as Record<string, { nombre: string; precio: number }[]>,
     productos: prods.rows,
     pizzas: pizzas.rows,
     inventario: { bebidas: grupo('bebida'), utensilios: grupo('utensilio'), insumos: grupo('insumo') }

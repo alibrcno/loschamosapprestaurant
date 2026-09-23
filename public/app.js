@@ -34,7 +34,8 @@
     // Trae lo que cambiaron otros equipos: menú y precios, y el estado de la caja
     if (!LC.user) return;
     const tareas = [];
-    if (view === 'pos' || view === 'ajustes') tareas.push(LC.cargarCatalogo());
+    if (view === 'pos' || view === 'ajustes' || view === 'almacen') tareas.push(LC.cargarCatalogo());
+    if (view === 'almacen' && LC.almacenOlvidar) LC.almacenOlvidar();
     if (['inicio', 'pos', 'caja', 'cocina', 'reportes', 'apertura', 'cierre'].includes(view)) tareas.push(LC.cargarTurno());
     if (['inicio', 'pos', 'orden', 'caja', 'cocina', 'reportes', 'cierre'].includes(view)) tareas.push(LC.cargarPedidos());
     if (tareas.length) Promise.all(tareas).then(() => refrescarSiSePuede(view)).catch(() => {});
@@ -156,7 +157,7 @@
     const rol = (LC.ROLES[LC.user.rol] || {}).nombre || LC.user.rol;
     $('#top').innerHTML = `
       <div class="brand">${esc(LC.db.config.negocio)}</div>
-      <div class="turno-pill ${t ? 'on' : 'off'}">${t ? 'Caja abierta ' + LC.hora(t.abiertoEn) : LC.esperandoCocina() ? 'Esperando cocina' : 'Caja cerrada'}</div>
+      <div class="turno-pill ${t ? 'on' : 'off'}">${t ? 'Caja abierta ' + LC.hora(t.cajaAbiertaEn || t.abiertoEn) : LC.esperandoCocina() ? 'Esperando cocina' : LC.soloCocina() ? 'Cocina abierta' : 'Caja cerrada'}</div>
       <div class="who"><span>${esc(LC.user.nombre)}<small>${esc(rol)}</small></span><button class="link" data-a="salir">Salir</button></div>`;
   }
   const NAV = [
@@ -165,6 +166,7 @@
     { v: 'cocina', ico: '🔥', t: 'Cocina', also: ['cocinaCierre'], ok: () => LC.guard('cocina.comandas', 'cocina.inventario') },
     { v: 'caja', ico: '💵', t: 'Caja', also: ['apertura', 'cierre'], ok: () => LC.guard('turno.operar', 'caja.movimientos', 'inventario.entradas') },
     { v: 'reportes', ico: '📊', t: 'Reportes', ok: () => LC.can('reportes.ver') },
+    { v: 'almacen', ico: '📦', t: 'Almacén', ok: () => LC.can('almacen.gestionar') },
     { v: 'ajustes', ico: '⚙', t: 'Ajustes', ok: () => LC.guard('catalogo.editar', 'usuarios.gestionar') }
   ];
   function renderNav() {
@@ -258,7 +260,7 @@
 
     return `
     <section class="hero-turno ${t ? 'abierto' : 'cerrado'}">
-      <p class="ht-estado">${t ? 'Caja abierta desde las ' + LC.hora(t.abiertoEn) : LC.esperandoCocina() ? 'Caja cerrada · esperando el inventario de cocina' : 'Caja cerrada'}</p>
+      <p class="ht-estado">${t ? 'Caja abierta desde las ' + LC.hora(t.cajaAbiertaEn || t.abiertoEn) : LC.esperandoCocina() ? 'Caja cerrada · esperando el inventario de cocina' : LC.soloCocina() ? `Cocina abierta desde las ${LC.hora(LC.turnoCocina().abiertoEn)} · falta abrir la caja` : 'Caja cerrada'}</p>
       ${t ? `<h1 class="num">${LC.fmt(r.ventas)}</h1>
         <p>Vendido en este turno: ${r.ordenesPagadas} cuentas cerradas, ${abiertas.length} abiertas, ${comandas} comandas en cocina.</p>`
         : `<h1>Hola, ${esc(LC.user.nombre.split(' ')[0])}</h1>
@@ -267,7 +269,8 @@
           ? `<p>Falta el inventario de cierre de cocina. Con ese último paso se calcula el resultado del día.</p>
              ${can('cocina.inventario') ? '<button class="btn primary lg" data-a="go" data-v="cocinaCierre">Hacer inventario de cocina</button>' : ''}
              ${can('turno.operar') ? '<button class="btn ghost" data-a="go" data-v="apertura">Opciones</button>' : ''}`
-          : can('turno.operar') ? '<button class="btn primary lg" data-a="go" data-v="apertura">Abrir caja</button>' : '<p class="muted-inv">La encargada debe abrir la caja.</p>'}`}
+          : can('turno.operar') ? '<button class="btn primary lg" data-a="go" data-v="apertura">Abrir caja</button>'
+          : can('cocina.inventario') ? `<button class="btn primary lg" data-a="go" data-v="cocina" data-tab="inventario">${LC.soloCocina() ? 'Ir a cocina' : 'Abrir cocina'}</button>` : '<p class="muted-inv">La encargada debe abrir la caja.</p>'}`}
     </section>
     ${t && can('reportes.ver') ? `<div class="saldo-grid">${LC.CUENTAS.map((c) => `<div class="saldo"><span>${c}</span><strong class="num">${LC.fmt(LC.db.saldos[c])}</strong></div>`).join('')}</div>` : ''}
     <div class="quick">${acc.map(([v, t1, t2]) => `<button class="quick-i" data-a="go" data-v="${v}"><strong>${t1}</strong><span>${t2}</span></button>`).join('')}</div>`;
@@ -277,11 +280,11 @@
   LC.V.ajustes = (p) => {
     if (!LC.guard('catalogo.editar', 'usuarios.gestionar')) return LC.sinPermiso();
     const tabs = [];
-    if (LC.can('catalogo.editar')) tabs.push(['menu', 'Menú'], ['pizzas', 'Pizzas'], ['bebidas', 'Bebidas'], ['utensilios', 'Utensilios'], ['insumos', 'Insumos'], ['negocio', 'Negocio']);
+    if (LC.can('catalogo.editar')) tabs.push(['menu', 'Menú'], ['pizzas', 'Pizzas'], ['bebidas', 'Bebidas'], ['utensilios', 'Utensilios'], ['insumos', 'Insumos'], ['preparaciones', 'Preparaciones'], ['negocio', 'Negocio']);
     if (LC.can('usuarios.gestionar')) tabs.push(['usuarios', 'Usuarios']);
     if (LC.user.rol === 'admin') tabs.push(['datos', 'Datos']);
     const tab = tabs.some((x) => x[0] === p.tab) ? p.tab : tabs[0][0];
-    const body = { menu: tabMenu, pizzas: tabPizzas, negocio: tabNegocio, usuarios: tabUsuarios, datos: tabDatos }[tab];
+    const body = { menu: tabMenu, pizzas: tabPizzas, preparaciones: tabPreparaciones, negocio: tabNegocio, usuarios: tabUsuarios, datos: tabDatos }[tab];
     const aviso = LC.catalogoVacio && LC.can('catalogo.editar') && tab !== 'usuarios' ? `<div class="notice">
       <strong>El menú todavía no está en el servidor.</strong> Súbelo una vez desde este equipo: productos, pizzas, bebidas, utensilios, insumos y datos del negocio. Después todos los equipos verán lo mismo.
       <button class="btn primary block" data-a="subirCatalogo">Subir el menú de este equipo al servidor</button></div>` : '';
@@ -298,10 +301,12 @@
       await LC.cargarCatalogo();
     } catch (e) {
       if (btn) btn.disabled = false;
-      return LC.toast(e.message, 'error');
+      LC.toast(e.message, 'error');
+      return false;
     }
     if (msg) LC.toast(msg);
     LC.render();
+    return true;
   }
   LC.A.subirCatalogo = async (d, el) => {
     if (!confirm('¿Subir el menú, las pizzas, el inventario y los datos del negocio de este equipo al servidor?')) return;
@@ -334,7 +339,12 @@
     ${cats.map((c) => {
       const ps = LC.db.productos.filter((x) => x.categoria === c);
       if (!ps.length) return '';
-      return `<h3 class="sec">${esc(c)}</h3><div class="card list-edit">${ps.map((x) => `
+      const ex = (LC.db.extras || {})[c] || [];
+      return `<h3 class="sec">${esc(c)}</h3>
+      <form class="card form" data-submit="extrasGuardar"><input type="hidden" name="categoria" value="${esc(c)}">
+        <label>Extras de ${esc(c)} (uno por línea: nombre y precio)<textarea name="extras" rows="${Math.max(2, ex.length + 1)}" placeholder="Queso extra: 3000&#10;Tocineta: 4000">${esc(ex.map((e) => `${e.nombre}: ${e.precio}`).join('\n'))}</textarea></label>
+        <button class="btn sm">Guardar extras</button></form>
+      <div class="card list-edit">${ps.map((x) => `
         <form class="row-edit" data-submit="prodGuardar">
           <input type="hidden" name="id" value="${x.id}">
           <input name="nombre" value="${esc(x.nombre)}" required aria-label="Nombre">
@@ -346,6 +356,15 @@
         </form>`).join('')}</div>`;
     }).join('')}`;
   }
+  LC.A.extrasGuardar = (d, f) => {
+    const extras = [];
+    for (const lin of d.extras.split('\n').map((x) => x.trim()).filter(Boolean)) {
+      const m = lin.match(/^(.+?)[:=\s]\s*\$?\s*([\d.]+)$/);
+      if (!m) return LC.toast(`Escribe cada extra así: "Queso extra: 3000" (revisa "${lin}")`, 'error');
+      extras.push({ nombre: m[1].trim(), precio: parseInt(m[2].replace(/\./g, ''), 10) });
+    }
+    return enServidor(f, () => LC.api('catalogo/categorias', { method: 'PATCH', body: { nombre: d.categoria, extras } }), 'Extras guardados');
+  };
   const datosProducto = (d) => ({ nombre: d.nombre.trim(), categoria: d.categoria.trim(), precio: Math.round(LC.num(d.precio)) });
   LC.A.prodNuevo = (d, f) => enServidor(f, async () => {
     await LC.api('catalogo/productos', { method: 'POST', body: datosProducto(d) });
@@ -366,6 +385,55 @@
       await LC.api('catalogo/productos', { method: 'DELETE', body: { id: d.id } });
       LC.log('Producto eliminado', x.nombre);
     }, 'Producto eliminado');
+  };
+
+  /* ---------- preparaciones de cocina (salsa de pizza, guiso, piña…) y sus materiales ---------- */
+  const todosLosItems = () => ['insumos', 'utensilios', 'bebidas'].flatMap((g) => LC.db[g].map((it) => Object.assign({ grupo: g }, it)));
+  const filaMaterial = (m) => `<div class="fila-material grid2">
+      <label>Material<select name="item"><option value="">Elige</option>${['insumos', 'utensilios', 'bebidas'].map((g) => `<optgroup label="${LC.INV[g]}">${LC.db[g].map((it) => `<option value="${it.id}" ${m && m.itemId === it.id ? 'selected' : ''}>${esc(it.nombre)} (${esc(it.unidad)})</option>`).join('')}</optgroup>`).join('')}</select></label>
+      <label>Cantidad por tanda<input type="number" name="cantidad" min="0" step="any" inputmode="decimal" value="${m ? m.cantidad : ''}"></label></div>`;
+  function tabPreparaciones() {
+    const preps = LC.db.config.preparaciones || [];
+    const nombreDe = (id) => (todosLosItems().find((x) => x.id === id) || {}).nombre || 'Material borrado';
+    return `<p class="muted">Lo que cocina prepara por tandas. Al cerrar, cocina marca qué hay que preparar mañana y los materiales de cada tanda entran solos a la lista de compras.</p>
+    ${preps.map((p, i) => `<div class="card"><h3>${esc(p.nombre)}</h3>
+      <ul>${p.materiales.map((m) => `<li>${esc(nombreDe(m.itemId))}: ${LC.q(m.cantidad)}</li>`).join('')}</ul>
+      <button class="btn sm" data-a="prepEditar" data-i="${i}">Editar</button> <button class="btn sm ghost danger" data-a="prepBorrar" data-i="${i}">Eliminar</button></div>`).join('') || '<p class="empty">Todavía no hay preparaciones.</p>'}
+    <button class="btn primary" data-a="prepEditar" data-i="-1">Nueva preparación</button>`;
+  }
+  LC.A.prepEditar = (d) => {
+    const p = (LC.db.config.preparaciones || [])[+d.i] || { nombre: '', materiales: [null] };
+    LC.modal(`${LC.modalHead(p.nombre || 'Nueva preparación')}
+      <form class="form" data-submit="prepGuardar"><input type="hidden" name="i" value="${d.i}">
+        <label>Nombre<input name="nombre" value="${esc(p.nombre)}" required placeholder="Ej. Salsa de pizza"></label>
+        <div id="filas-material">${p.materiales.map(filaMaterial).join('')}</div>
+        <button type="button" class="btn sm" data-a="prepFila">+ Otro material</button>
+        <button class="btn primary lg block">Guardar</button></form>`, true);
+  };
+  LC.A.prepFila = () => {
+    const cont = document.getElementById('filas-material');
+    cont.insertAdjacentHTML('beforeend', filaMaterial(null));
+  };
+  const guardarPreps = (el, lista, msg) => enServidor(el, () => LC.api('catalogo/preparaciones', { method: 'PATCH', body: { preparaciones: lista } }), msg);
+  LC.A.prepGuardar = (d, f) => {
+    const materiales = [];
+    for (const fila of f.querySelectorAll('.fila-material')) {
+      const itemId = fila.querySelector('[name=item]').value, cantidad = LC.num(fila.querySelector('[name=cantidad]').value);
+      if (!itemId) continue;
+      if (cantidad <= 0) return LC.toast('Escribe la cantidad de cada material', 'error');
+      materiales.push({ itemId, cantidad });
+    }
+    if (!materiales.length) return LC.toast('Agrega al menos un material', 'error');
+    const lista = (LC.db.config.preparaciones || []).slice();
+    const nueva = { nombre: d.nombre.trim(), materiales };
+    if (+d.i >= 0) lista[+d.i] = nueva; else lista.push(nueva);
+    return guardarPreps(f, lista, 'Preparación guardada').then((ok) => ok && LC.cerrarModal());
+  };
+  LC.A.prepBorrar = (d, el) => {
+    const lista = (LC.db.config.preparaciones || []).slice();
+    const p = lista[+d.i]; if (!p || !confirm(`¿Eliminar "${p.nombre}"?`)) return;
+    lista.splice(+d.i, 1);
+    return guardarPreps(el, lista, 'Preparación eliminada');
   };
 
   function tabPizzas() {

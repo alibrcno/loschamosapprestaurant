@@ -80,9 +80,9 @@ describe('API: turno y caja', () => {
     assert.equal((await llamar('turno/movimiento', 'POST', { tipo: 'gasto', cuenta: 'Efectivo', monto: 20000, concepto: 'Gas', categoria: 'Otros' }, enc)).status, 201);
     assert.equal((await llamar('turno/traslado', 'POST', { desde: 'Efectivo', hacia: 'Efectivo', monto: 1000 }, enc)).status, 400);
     assert.equal((await llamar('turno/traslado', 'POST', { desde: 'Efectivo', hacia: 'Bancolombia', monto: 30000, concepto: 'Consignación' }, enc)).status, 201);
-    // Cocina registra el queso que llegó, pagado en efectivo; no puede registrar bebidas
+    // Cocina no registra bebidas; el queso pagado en efectivo lo registra la caja (cocina no maneja dinero)
     assert.equal((await llamar('turno/llegada', 'POST', { itemId: coca, cantidad: 12 }, cocina)).status, 403);
-    assert.equal((await llamar('turno/llegada', 'POST', { itemId: queso, cantidad: 2, costo: 50000, cuenta: 'Efectivo', nota: 'Lácteos del Cesar' }, cocina)).status, 201);
+    assert.equal((await llamar('turno/llegada', 'POST', { itemId: queso, cantidad: 2, costo: 50000, cuenta: 'Efectivo', nota: 'Lácteos del Cesar' }, enc)).status, 201);
     assert.equal((await llamar('turno/llegada', 'POST', { itemId: coca, cantidad: 12, cuenta: 'Efectivo' }, enc)).status, 400, 'si se pagó, debe decir cuánto');
     const r = await llamar('turno/llegada', 'POST', { itemId: coca, cantidad: 12 }, enc);
     assert.equal(r.status, 201);
@@ -125,7 +125,11 @@ describe('API: turno y caja', () => {
   });
 
   test('Cocina hace el último cierre y ahí sale la utilidad del día', async () => {
-    const r = await llamar('turno/cerrar-cocina', 'POST', { conteo: { [queso]: 1.5 }, obs: 'Todo bien' }, cocina);
+    // El dueño configura la salsa de pizza: cada tanda lleva 2 kg de queso
+    assert.equal((await llamar('catalogo/preparaciones', 'PATCH', { preparaciones: [{ nombre: 'Salsa de pizza', materiales: [{ itemId: queso, cantidad: 2 }] }] }, enc)).status, 403);
+    assert.equal((await llamar('catalogo/preparaciones', 'PATCH', { preparaciones: [{ nombre: 'Salsa de pizza', materiales: [{ itemId: queso, cantidad: 2 }] }] }, admin)).status, 200);
+    assert.equal((await llamar('turno/cerrar-cocina', 'POST', { conteo: { [queso]: 1.5 }, preparar: ['Guiso'] }, cocina)).status, 400, 'solo preparaciones configuradas');
+    const r = await llamar('turno/cerrar-cocina', 'POST', { conteo: { [queso]: 1.5 }, obs: 'Se dañó una tubería', preparar: ['Salsa de pizza'] }, cocina);
     assert.equal(r.status, 201);
     assert.equal(r.datos.termino, true);
     assert.equal(r.datos.turnoActualId, null, 'el turno terminó');
@@ -140,6 +144,9 @@ describe('API: turno y caja', () => {
     assert.equal(res.compras, 50000);
     assert.equal(res.utilidad, 62000 - 5200 - 3500 - 37500 - 20000);
     assert.equal(res.cocinaCerrada, true);
+    const q = res.insumos.find((x: any) => x.id === queso);
+    assert.equal(q.comprar, 5.5, 'sugerido 5 + 2 para la salsa de pizza − 1,5 que quedan');
+    assert.deepEqual(res.preparar, ['Salsa de pizza']);
     assert.deepEqual(res.descuadre, { Efectivo: 0, Nequi: 0, Bancolombia: 0, 'Datáfono': 0 });
     assert.equal(res.personal.length, 2);
     // Lo vendido sale de las cuentas cobradas en el servidor
@@ -148,11 +155,36 @@ describe('API: turno y caja', () => {
     assert.equal(res.bebidas.find((b: any) => b.id === coca).pos, 2);
   });
 
+  test('Al día siguiente cocina abre primero (desde las 2 p. m.) y la encargada abre la caja después', async () => {
+    process.env.HORA_APERTURA_COCINA = '23';
+    const temprano = await llamar('turno/abrir-cocina', 'POST', {}, cocina);
+    if (new Date().getUTCHours() !== 4) assert.match(temprano.datos.error || '', /desde las 11 p. m./, 'antes de la hora no abre');
+    process.env.HORA_APERTURA_COCINA = '0';
+    assert.equal((await llamar('turno/abrir-cocina', 'POST', {}, mesera)).status, 403, 'la mesera no abre cocina');
+    const r = await llamar('turno/abrir-cocina', 'POST', {}, cocina);
+    assert.equal(r.status, 201);
+    const t = r.datos.turnos.find((x: any) => x.id === r.datos.turnoActualId);
+    assert.equal(t.cajaAbierta, false);
+    assert.equal(t.apertura.insumos[queso], 1.5, 'cocina arranca con lo que contó anoche');
+    assert.equal((await llamar('turno/abrir-cocina', 'POST', {}, cocina)).status, 409, 'no se abre dos veces');
+    // Cocina registra una factura con varios artículos, pero no dice de qué cuenta se pagó
+    const factura = { items: [{ itemId: queso, cantidad: 1, costo: 25000 }, { itemId: queso, cantidad: 0.5 }], nota: 'Lácteos, factura 55' };
+    assert.equal((await llamar('turno/llegada', 'POST', { ...factura, cuenta: 'Efectivo' }, cocina)).status, 403, 'cocina no dice quién pagó');
+    const l = await llamar('turno/llegada', 'POST', factura, cocina);
+    assert.equal(l.status, 201);
+    assert.equal(l.datos.entradas.length, 2);
+    assert.equal((await llamar('pedidos', 'POST', { accion: 'enviar', lote: randomUUID(), nueva: { tipo: 'mesa', mesa: 1 }, lineas: [{ tipo: 'bebida', id: coca, qty: 1 }] }, mesera)).status, 409, 'sin caja abierta no se vende');
+    assert.equal((await llamar('turno/movimiento', 'POST', { tipo: 'gasto', cuenta: 'Efectivo', monto: 1000, concepto: 'x', categoria: 'Otros' }, enc)).status, 409, 'ni se mueve dinero');
+  });
+
   test('Si cocina no hace inventario, la encargada puede terminar el turno con un motivo', async () => {
     const r1 = await llamar('turno/abrir', 'POST', apertura({ bebidas: { [coca]: 20 }, utensilios: { [servilletas]: 4 }, saldos: { Efectivo: 31000, Nequi: 31000, Bancolombia: 30000, 'Datáfono': 0 }, nota: '' }), enc);
     assert.equal(r1.status, 201, 'el día siguiente abre sin diferencias');
     const t1 = r1.datos.turnos.find((x: any) => x.id === r1.datos.turnoActualId);
+    assert.equal(t1.cajaAbierta, true, 'la caja se abrió en el mismo turno que abrió cocina');
     assert.equal(t1.apertura.insumos[queso], 1.5, 'arranca con lo que contó cocina anoche');
+    assert.equal(t1.apertura.cocina.por, 'Cocinero D');
+    assert.equal(t1.personal.length, 2, 'el cocinero no queda repetido');
     assert.equal((await llamar('turno/terminar-sin-cocina', 'POST', { motivo: 'x' }, enc)).status, 409, 'primero se cierra la caja');
     await llamar('turno/cerrar-caja', 'POST', { bebidas: { [coca]: 20 }, utensilios: { [servilletas]: 4 }, saldos: { Efectivo: 31000, Nequi: 31000, Bancolombia: 30000, 'Datáfono': 0 } }, enc);
     assert.equal((await llamar('turno/terminar-sin-cocina', 'POST', {}, enc)).status, 400, 'el motivo es obligatorio');

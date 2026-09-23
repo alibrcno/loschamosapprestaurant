@@ -105,6 +105,9 @@ BEGIN;
 SELECT set_config('app.tenant_id', :'ta', true) \gset
 -- Turno abierto a las 4 p. m. del 22 de septiembre en Colombia (21:00 UTC). Una venta a la 1 a. m. del 23 sigue siendo de ese turno.
 INSERT INTO shifts (tenant_id, abierto_en, abierto_por) SELECT current_tenant(), '2026-09-22 16:00-05', id FROM users LIMIT 1;
+SELECT pg_temp.debe_fallar($$UPDATE shifts SET caja_cerrada_en = now(), caja_cerrada_por = abierto_por$$,
+  'No se cierra una caja que no se ha abierto (cocina abrió el turno, la encargada todavía no)');
+UPDATE shifts SET caja_abierta_en = '2026-09-22 17:00-05', caja_abierta_por = abierto_por;
 SELECT pg_temp.ok((SELECT dia FROM shifts) = '2026-09-22', 'Turno de las 4 p. m. pertenece al 22 de septiembre');
 SELECT pg_temp.ok(dia_colombia('2026-09-23 06:00Z') = '2026-09-23' AND dia_colombia('2026-09-23 04:59Z') = '2026-09-22',
   'Las 11:59 p. m. en Colombia (04:59 UTC del 23) todavía es 22 de septiembre');
@@ -138,8 +141,20 @@ UPDATE print_jobs SET impreso_en = now(), impreso_por = (SELECT id FROM users LI
 SELECT pg_temp.ok((SELECT count(*) FROM print_jobs WHERE impreso_en IS NOT NULL) = 1, 'El PC de caja marca la impresión como hecha');
 SELECT pg_temp.debe_fallar($$UPDATE print_jobs SET datos = '{"total": 1}'$$, 'Nadie cambia lo que se mandó a imprimir');
 SELECT pg_temp.debe_fallar($$DELETE FROM print_jobs$$, 'La cola de impresión no se borra');
+-- Almacén: lo que hay es la suma de sus movimientos, que no se editan ni se borran
+INSERT INTO inventory_items (tenant_id, tipo, nombre, costo) VALUES (current_tenant(), 'utensilio', 'Tenedores', 50);
+INSERT INTO warehouse_moves (tenant_id, item_id, cantidad, tipo, costo_total) SELECT current_tenant(), id, 100, 'entrada', 5000 FROM inventory_items WHERE nombre = 'Tenedores';
+INSERT INTO warehouse_moves (tenant_id, item_id, cantidad, tipo) SELECT current_tenant(), id, -30, 'salida' FROM inventory_items WHERE nombre = 'Tenedores';
+SELECT pg_temp.ok((SELECT sum(cantidad) FROM warehouse_moves) = 70, 'En el almacén quedan 70 tenedores (100 − 30)');
+SELECT pg_temp.debe_fallar($$UPDATE warehouse_moves SET cantidad = 1$$, 'Un movimiento del almacén no se edita');
+SELECT pg_temp.debe_fallar($$DELETE FROM warehouse_moves$$, 'Un movimiento del almacén no se borra');
+SELECT pg_temp.debe_fallar($$INSERT INTO warehouse_moves (tenant_id, item_id, cantidad, tipo) SELECT current_tenant(), id, 5, 'salida' FROM inventory_items WHERE nombre = 'Tenedores'$$,
+  'Una salida del almacén siempre resta');
+SELECT pg_temp.debe_fallar($$INSERT INTO warehouse_moves (tenant_id, item_id, cantidad, tipo) SELECT current_tenant(), id, -5, 'ajuste' FROM inventory_items WHERE nombre = 'Tenedores'$$,
+  'Un ajuste del almacén exige motivo');
 SELECT set_config('app.tenant_id', :'tb', true) \gset
 SELECT pg_temp.ok((SELECT count(*) FROM print_jobs) = 0, 'Chamos B no ve las impresiones de Chamos A');
+SELECT pg_temp.ok((SELECT count(*) FROM warehouse_moves) = 0, 'Chamos B no ve el almacén de Chamos A');
 ROLLBACK;
 
 \echo ''
