@@ -458,9 +458,16 @@
       : tg.conectado
         ? '<p><span class="tag ok">Telegram conectado</span> <button type="button" class="btn sm ghost" data-a="avisoTelegramQuitar">Desconectar</button></p>'
         : enlaceTelegram
-          ? `<p class="muted">1. Abre Telegram con este botón y toca <strong>Iniciar</strong> (Start). 2. Vuelve aquí y confirma.</p>
-             <a class="btn primary" href="${esc(enlaceTelegram)}" target="_blank" rel="noopener">Abrir Telegram</a>
-             <button type="button" class="btn" data-a="avisoTelegramConfirmar">Ya toqué Iniciar</button>`
+          ? (() => {
+            // Además del enlace web (t.me), se ofrece abrir la app de Telegram directo (tg://) y el mensaje
+            // para escribirlo a mano: algunas redes o proveedores de internet bloquean t.me.
+            const codigo = enlaceTelegram.split('start=')[1] || '', bot = tg.bot || '';
+            return `<p class="muted">1. Abre el bot con uno de estos botones y toca <strong>Iniciar</strong> (Start). 2. Vuelve aquí y toca "Ya toqué Iniciar".</p>
+             <a class="btn primary" href="tg://resolve?domain=${esc(bot)}&start=${esc(codigo)}">Abrir en la app de Telegram</a>
+             <a class="btn" href="${esc(enlaceTelegram)}" target="_blank" rel="noopener">Abrir en el navegador</a>
+             <p class="muted">¿No abre ninguno? En Telegram busca <strong>@${esc(bot)}</strong> y envíale este mensaje exacto: <strong>/start ${esc(codigo)}</strong></p>
+             <button type="button" class="btn" data-a="avisoTelegramConfirmar">Ya toqué Iniciar</button>`;
+          })()
           : '<button type="button" class="btn primary" data-a="avisoTelegramConectar">Conectar mi Telegram</button>';
     const correo = !co.disponible
       ? '<p class="notice">Falta la clave del servicio de correo (variable RESEND_API_KEY en Vercel).</p>'

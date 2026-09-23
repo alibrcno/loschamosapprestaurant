@@ -53,7 +53,8 @@ export const POST = ruta(async (req) => {
     if (b.accion === 'telegram-confirmar') {
       if (!d.telegramCodigo || !d.codigoVence || d.codigoVence < Date.now()) throw new ErrorApi(409, 'El enlace venció. Toca "Conectar Telegram" otra vez.');
       const updates: any[] = await telegram('getUpdates', { allowed_updates: ['message'] });
-      const m = updates.map((x) => x.message).reverse().find((x) => x && typeof x.text === 'string' && x.text.trim() === `/start ${d.telegramCodigo}`);
+      // Vale tocar Iniciar desde el enlace ("/start CODIGO") o escribir el código a mano
+      const m = updates.map((x) => x.message).reverse().find((x) => x && typeof x.text === 'string' && x.text.includes(d.telegramCodigo!));
       if (!m) throw new ErrorApi(409, 'Todavía no llega tu mensaje. En Telegram toca "Iniciar" (Start) en el bot y vuelve a intentar.');
       d.telegramChatId = String(m.chat.id);
       d.telegramCodigo = null; d.codigoVence = null;

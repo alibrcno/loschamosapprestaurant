@@ -21,7 +21,7 @@ before(async () => {
       const responder = (status: number, j: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(j)); };
       if (falla) return responder(500, { ok: false, description: 'caído' });
       if (req.url!.endsWith('/getMe')) return responder(200, { ok: true, result: { username: 'LosChamosBot' } });
-      if (req.url!.endsWith('/getUpdates')) return responder(200, { ok: true, result: [{ update_id: 1, message: { text: `/start ${codigoEnTelegram}`, chat: { id: 987654 } } }] });
+      if (req.url!.endsWith('/getUpdates')) return responder(200, { ok: true, result: [{ update_id: 1, message: { text: codigoEnTelegram.endsWith(' ') ? codigoEnTelegram : `/start ${codigoEnTelegram}`, chat: { id: 987654 } } }] });
       if (req.url!.endsWith('/sendMessage')) { recibidos.push({ canal: 'telegram', datos }); return responder(200, { ok: true, result: {} }); }
       if (req.url === '/emails') {
         assert.equal(req.headers.authorization, 'Bearer clave-resend-prueba');
@@ -90,7 +90,7 @@ describe('Avisos del cierre por Telegram y correo', () => {
     assert.match(r.datos.enlace, /^https:\/\/t\.me\/LosChamosBot\?start=[0-9a-f]{12}$/);
     codigoEnTelegram = 'otro-codigo';
     assert.equal((await llamar('avisos', 'POST', { accion: 'telegram-confirmar' }, admin)).status, 409, 'sin el mensaje correcto no conecta');
-    codigoEnTelegram = r.datos.enlace.split('start=')[1];
+    codigoEnTelegram = r.datos.enlace.split('start=')[1] + ' ';  // escrito a mano, con un espacio de más
     const ok = await llamar('avisos', 'POST', { accion: 'telegram-confirmar' }, admin);
     assert.equal(ok.datos.telegram.conectado, true);
     assert.match(recibidos.pop()!.datos.text, /Aquí te llegarán los cierres de Chamos E/);
