@@ -458,6 +458,8 @@
     LC.log('Pizza editada', d.nombre.trim());
   }, 'Guardado');
 
+  // Unidad: se elige de una lista (unidad, gramo, kilo…). Si un ítem viejo tiene otra, se conserva.
+  const selUnidad = (val, attrs = '') => `<select name="unidad" required ${attrs}>${Object.entries(LC.UNIDADES).map(([k, n]) => `<option value="${k}" ${k === val ? 'selected' : ''}>${n} (${k})</option>`).join('')}${val && !LC.UNIDADES[val] ? `<option value="${esc(val)}" selected>${esc(val)}</option>` : ''}</select>`;
   function tabInventario(tipo) {
     const esB = tipo === 'bebidas';
     const items = LC.db[tipo];
@@ -467,19 +469,19 @@
       <input type="hidden" name="tipo" value="${tipo}">
       <div class="grid3">
         <label>Nombre<input name="nombre" required></label>
-        <label>Unidad<input name="unidad" value="${esB ? 'und' : ''}" placeholder="kg, und, paquete" required></label>
-        ${esB ? '<label>Precio de venta<input type="number" name="precio" min="0" step="100" required></label>' : ''}
-        <label>Costo por unidad<input type="number" name="costo" min="0" step="any" value="0"></label>
-        <label>Stock sugerido<input type="number" name="sugerido" min="0" step="any" required></label>
+        <label>Se cuenta por${selUnidad(esB ? 'und' : tipo === 'insumos' ? 'kg' : 'und')}</label>
+        ${esB ? '<label>Precio de venta<input type="number" name="precio" min="1" step="100" required></label>' : ''}
+        <label>Costo de 1 unidad de conteo<input type="number" name="costo" min="0" step="any" value="0"></label>
+        <label>Stock sugerido (solo lo ves tú)<input type="number" name="sugerido" min="0" step="any" required></label>
       </div>
       <button class="btn primary">Agregar</button>
     </form>
-    <p class="muted">El stock solo cambia con conteos, llegadas de mercancía o un ajuste con motivo, así cada diferencia queda registrada.</p>
+    <p class="muted">Ejemplo: el queso se cuenta por kilo y cuesta $24.000 el kilo; las servilletas por paquete. El stock sugerido es lo que quieres tener para empezar el día: con él la app calcula las compras. El stock solo cambia con conteos, llegadas de mercancía o un ajuste con motivo, así cada diferencia queda registrada.</p>
     <div class="card list-edit">${items.map((it) => `
       <form class="row-edit" data-submit="invGuardar">
         <input type="hidden" name="tipo" value="${tipo}"><input type="hidden" name="id" value="${it.id}">
         <input name="nombre" value="${esc(it.nombre)}" required aria-label="Nombre">
-        <input name="unidad" value="${esc(it.unidad)}" required aria-label="Unidad" class="w-s">
+        ${selUnidad(it.unidad, 'aria-label="Unidad" class="w-s"')}
         ${esB ? `<label class="mini">Precio<input type="number" name="precio" value="${LC.num(it.precio)}" min="0" step="100"></label>` : ''}
         <label class="mini">Costo<input type="number" name="costo" value="${LC.num(it.costo)}" min="0" step="any"></label>
         <label class="mini">Sugerido<input type="number" name="sugerido" value="${LC.num(it.sugerido)}" min="0" step="any"></label>
@@ -537,7 +539,7 @@
       <div class="grid3">
         <label>Número de mesas<input type="number" name="mesas" value="${c.mesas}" min="1" max="60" required></label>
         <label>Ancho de impresora<select name="ticket"><option value="58" ${c.ticket == 58 ? 'selected' : ''}>58 mm</option><option value="80" ${c.ticket == 80 ? 'selected' : ''}>80 mm</option></select></label>
-        <label>Valor del domicilio<input type="number" name="valorDomicilio" value="${LC.num(c.valorDomicilio)}" min="0" step="500"></label>
+        <label>Valor del domicilio<input type="number" name="valorDomicilio" value="${LC.valorDomicilio()}" min="0" step="500"></label>
       </div>
       <div class="grid3">
         <label>NIT<input name="nit" value="${esc(c.nit)}"></label>

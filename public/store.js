@@ -9,7 +9,7 @@
 'use strict';
 (function () {
   const LC = (window.LC = window.LC || {});
-  LC.VERSION = '2.6.1';
+  LC.VERSION = '2.6.2';
   LC.TENANT = 'loschamos'; // en fase 2 viene del login (multi-negocio)
   LC.KEY = 'lc2_' + LC.TENANT;
 
@@ -19,6 +19,10 @@
   LC.CAT_GASTO = ['Compra de inventario', 'Nómina', 'Domiciliario', 'Servicios públicos', 'Arriendo', 'Mantenimiento', 'Otros'];
   LC.CAT_INGRESO = ['Aporte del dueño', 'Base de caja', 'Préstamo', 'Otros'];
   LC.INV = { bebidas: 'Bebidas', utensilios: 'Utensilios y desechables', insumos: 'Insumos de cocina' };
+  // Unidades para contar el inventario (se cuenta y se compra en la misma unidad)
+  LC.UNIDADES = { und: 'Unidad', g: 'Gramo', kg: 'Kilo', ml: 'Mililitro', L: 'Litro', paquete: 'Paquete', caja: 'Caja', bolsa: 'Bolsa', docena: 'Docena' };
+  LC.DOMICILIO_DEFECTO = 6000; // valor del envío si el negocio no ha puesto otro en Ajustes → Negocio
+  LC.valorDomicilio = () => LC.num(LC.db.config.valorDomicilio) || LC.DOMICILIO_DEFECTO;
 
   LC.PERMISOS = {
     'pos.tomar': 'Tomar pedidos de mesa y domicilio',
@@ -160,8 +164,8 @@
     const db = {
       version: 2,
       config: {
-        negocio: 'Los Chamos', whatsapp: '573218382315', mesas: 8, ticket: 58,
-        nit: '', direccion: '', telefono: '', imprimirComandas: true, valorDomicilio: 0
+        negocio: 'Los Chamos', whatsapp: '573218382315', mesas: 8, ticket: 80,
+        nit: '', direccion: '', telefono: '', imprimirComandas: true, valorDomicilio: 6000
       },
       usuarios: [],
       categorias: ['Pizzas', 'Hamburguesas', 'Arepas', 'Perros', 'Patacones', 'Entradas', 'Adicionales', 'Bebidas'],

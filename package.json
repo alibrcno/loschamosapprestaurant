@@ -7,7 +7,8 @@
   },
   "scripts": {
     "revisar": "tsc --noEmit",
-    "probar": "bash pruebas/correr.sh"
+    "probar": "bash pruebas/correr.sh",
+    "navegador": "bash pruebas/navegador/correr.sh"
   },
   "dependencies": {
     "bcryptjs": "3.0.2",

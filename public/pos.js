@@ -81,7 +81,7 @@
         <label>Nombre del cliente<input name="cliente" required></label>
         <label>Teléfono<input name="telefono" inputmode="tel"></label>
         <label>Dirección<input name="direccion" required></label>
-        <label>Valor del envío (se le paga al mensajero en efectivo)<input type="number" name="envio" min="0" step="500" required value="${LC.num(LC.db.config.valorDomicilio) || ''}"></label>
+        <label>Valor del envío (se le paga al mensajero en efectivo)<input type="number" name="envio" min="0" step="500" required value="${LC.valorDomicilio()}"></label>
         <fieldset class="seg"><legend>¿Cómo va a pagar el cliente?</legend>
           ${LC.CUENTAS.map((c) => `<label><input type="radio" name="pago" value="${c}" required><span>${c}</span></label>`).join('')}</fieldset>
         <label>Indicaciones<input name="nota" placeholder="Ej. casa esquinera, portón negro"></label>
