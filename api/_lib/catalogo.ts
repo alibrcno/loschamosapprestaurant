@@ -48,7 +48,7 @@ export async function idCategoria(db: PoolClient, tenantId: string, nombre: stri
 /** Todo el catálogo del negocio, con la misma forma que usa la app (public/store.js). */
 export async function leerCatalogo(db: PoolClient) {
   const [neg, cats, prods, pizzas, inv] = await Promise.all([
-    db.query('SELECT nombre, codigo, nit, direccion, telefono, whatsapp, config FROM tenants'),
+    db.query('SELECT nombre, codigo, nit, direccion, telefono, whatsapp, config, logo FROM tenants'),
     db.query('SELECT nombre, extras FROM categories ORDER BY orden, nombre'),
     db.query(`SELECT p.id, c.nombre AS categoria, p.nombre, p.precio, p.activo
               FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY c.orden, p.nombre`),

@@ -100,6 +100,48 @@
     } catch (e) { console.warn('No se pudo revisar la cola de impresión', e); }
     finally { imprimiendo = false; }
   };
+  // Ticket de prueba: sirve para revisar el logo, el encabezado, el ancho del papel y el corte
+  LC.A.imprimirPrueba = () => LC.imprimir(`${LC.db.config.logo ? `<div class="c"><img src="${esc(LC.db.config.logo)}" style="max-width:60%;max-height:90px;filter:grayscale(1)" alt=""></div>` : ''}
+    <div class="c b big">${esc(LC.db.config.negocio)}</div>${LC.db.config.ticketEncabezado ? `<div class="c s">${esc(LC.db.config.ticketEncabezado).replace(/\n/g, '<br>')}</div>` : ''}
+    <div class="hr"></div><div class="c b">PRUEBA DE IMPRESIÓN</div><div class="c s">${LC.fechaHora(new Date())}</div>
+    <div class="r"><span>1 Producto de prueba</span><span>${LC.fmt(10000)}</span></div><div class="hr"></div>
+    <div class="c s">${esc(LC.db.config.ticketPie || 'Gracias por tu compra').replace(/\n/g, '<br>')}</div>`);
+
+  // Acceso directo para Windows: abre la app en Chrome con impresión automática (sin cuadro de diálogo)
+  // y deja este equipo como estación de impresión. Se usa un perfil de Chrome aparte, así funciona
+  // aunque haya otras ventanas de Chrome abiertas.
+  LC.A.accesoCaja = () => {
+    const url = location.origin + location.pathname + '?estacion=1';
+    const bat = [
+      '@echo off',
+      'rem Los Chamos POS - PC de caja. Abre la app e imprime solo (Chrome con --kiosk-printing).',
+      'rem Para que abra al prender el PC: copia este archivo en la carpeta que abre Windows+R y "shell:startup".',
+      `set "URL=${url}"`,
+      'set "CHROME=%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe"',
+      'if not exist "%CHROME%" set "CHROME=%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe"',
+      'if not exist "%CHROME%" set "CHROME=%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe"',
+      'if not exist "%CHROME%" goto sinchrome',
+      'start "" "%CHROME%" --kiosk-printing --user-data-dir="%LocalAppData%\\LosChamosCaja" --app="%URL%"',
+      'exit /b',
+      ':sinchrome',
+      'echo No se encontro Google Chrome. Instalalo desde google.com/chrome y vuelve a abrir este archivo.',
+      'pause'
+    ].join('\r\n') + '\r\n';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([bat], { type: 'application/octet-stream' }));
+    a.download = 'LosChamos-Caja.bat';
+    document.body.appendChild(a); a.click(); a.remove();
+    LC.modal(`${LC.modalHead('Acceso directo del PC de caja')}
+      <ol class="pasos">
+        <li>Se descargó <strong>LosChamos-Caja.bat</strong>. Pásalo al escritorio del PC de caja (si Windows avisa, toca "Más información" → "Ejecutar de todas formas").</li>
+        <li>En Windows, pon la impresora térmica como <strong>predeterminada</strong> y activa el <strong>corte automático</strong> en sus preferencias.</li>
+        <li>Ábrelo con doble clic: se abre la app en su propia ventana. Ingresa una vez con la encargada o el administrador (la sesión dura 14 días).</li>
+        <li>Toca <strong>Caja → Imprimir prueba</strong>: debe salir sin preguntar y cortar el papel.</li>
+        <li>Déjala abierta (sin minimizar). Todo lo que pidan las meseras sale ahí.</li>
+      </ol>
+      <p class="muted">Para que abra sola al prender el PC: Windows + R, escribe <strong>shell:startup</strong> y copia ahí el archivo.</p>`);
+  };
+
   LC.A.impresionesVer = async () => {
     let r;
     try { r = await LC.api('impresion'); } catch (e) { return LC.toast(e.message, 'error'); }
@@ -156,7 +198,8 @@
     const t = LC.turno();
     const rol = (LC.ROLES[LC.user.rol] || {}).nombre || LC.user.rol;
     $('#top').innerHTML = `
-      <div class="brand">${esc(LC.db.config.negocio)}</div>
+      <div class="brand">${LC.db.config.logo ? `<img class="brand-logo" src="${esc(LC.db.config.logo)}" alt="">` : ''}${esc(LC.db.config.negocio)}</div>
+      ${LC.estacionActiva() ? '<div class="turno-pill on" title="Las comandas, pre-cuentas y recibos salen en este equipo">🖨 Imprime aquí</div>' : ''}
       <div class="turno-pill ${t ? 'on' : 'off'}">${t ? 'Caja abierta ' + LC.hora(t.cajaAbiertaEn || t.abiertoEn) : LC.esperandoCocina() ? 'Esperando cocina' : LC.soloCocina() ? 'Cocina abierta' : 'Caja cerrada'}</div>
       <div class="who"><span>${esc(LC.user.nombre)}<small>${esc(rol)}</small></span><button class="link" data-a="salir">Salir</button></div>`;
   }
@@ -180,6 +223,7 @@
   /* ---------------- ingreso (validado en el servidor) ---------------- */
   // El código del negocio se recuerda en este equipo para no escribirlo cada vez
   const COD = 'lc2_codigo';
+  const logoGuardado = () => { try { return localStorage.getItem('lc2_logo') || ''; } catch (e) { return ''; } };
   const codigoGuardado = () => { try { return localStorage.getItem(COD) || ''; } catch (e) { return ''; } };
 
   function renderLogin() {
@@ -188,7 +232,7 @@
     $('#nav').innerHTML = '';
     $('#main').innerHTML = `
     <div class="login">
-      <div class="login-brand"><div class="logo-mark">LC</div><h1>${esc(LC.db.config.negocio)}</h1><p>Punto de venta y control de turno</p></div>
+      <div class="login-brand">${logoGuardado() ? `<img class="login-logo" src="${esc(logoGuardado())}" alt="">` : '<div class="logo-mark">LC</div>'}<h1>${esc(LC.db.config.negocio)}</h1><p>Punto de venta y control de turno</p></div>
       <form class="card form" data-submit="login">
         <h2>Ingresar</h2>
         <label>Código del negocio<input name="codigo" required autocapitalize="none" autocomplete="organization" value="${esc(codigoGuardado())}"></label>
@@ -547,8 +591,18 @@
         <label>Teléfono<input name="telefono" value="${esc(c.telefono)}"></label>
       </div>
       <label class="check"><input type="checkbox" name="imprimirComandas" ${c.imprimirComandas ? 'checked' : ''}><span>Imprimir comanda al enviarla a cocina</span></label>
+      <h3 class="sec">Tickets</h3>
+      <label>Encabezado (líneas extra debajo del nombre)<textarea name="ticketEncabezado" rows="2" maxlength="200" placeholder="Ej. Domicilios 300 123 4567 · @loschamos">${esc(c.ticketEncabezado || '')}</textarea></label>
+      <label>Mensaje al final de la cuenta<textarea name="ticketPie" rows="2" maxlength="200" placeholder="Gracias por tu compra">${esc(c.ticketPie || '')}</textarea></label>
       <button class="btn primary">Guardar</button>
     </form>
+    <div class="card form">
+      <h3>Logo del negocio</h3>
+      <p class="muted">Sale arriba en la app y en los tickets. Usa una imagen cuadrada o horizontal; la app la achica sola.</p>
+      ${c.logo ? `<img class="logo-vista" src="${esc(c.logo)}" alt="Logo actual">` : '<p class="muted">Todavía no hay logo.</p>'}
+      <button class="btn" data-a="logoAbrir">Elegir imagen</button>
+      ${c.logo ? '<button class="btn ghost danger" data-a="logoQuitar">Quitar logo</button>' : ''}
+    </div>
     ${LC.can('reportes.ver') ? avisosHTML() : ''}`;
   }
 
@@ -614,10 +668,43 @@
     await LC.api('catalogo/negocio', { method: 'PATCH', body: {
       nombre: d.negocio.trim(), whatsapp: d.whatsapp.replace(/\D/g, ''), mesas: parseInt(d.mesas, 10) || 0,
       ticket: +d.ticket, valorDomicilio: Math.round(LC.num(d.valorDomicilio)), nit: d.nit.trim(), direccion: d.direccion.trim(),
-      telefono: d.telefono.trim(), imprimirComandas: !!d.imprimirComandas
+      telefono: d.telefono.trim(), imprimirComandas: !!d.imprimirComandas, ticketEncabezado: d.ticketEncabezado.trim(), ticketPie: d.ticketPie.trim()
     } });
     LC.log('Configuración editada');
   }, 'Guardado');
+  // Logo: se achica en el equipo (máximo 320 px) antes de subirlo, así pesa poco
+  const achicar = (archivo) => new Promise((ok, mal) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, 320 / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.max(1, Math.round(img.width * k)); cv.height = Math.max(1, Math.round(img.height * k));
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      let url = cv.toDataURL('image/png');
+      if (url.length > 110000) url = cv.toDataURL('image/jpeg', 0.85);
+      URL.revokeObjectURL(img.src); ok(url);
+    };
+    img.onerror = () => mal(new Error('No se pudo leer la imagen'));
+    img.src = URL.createObjectURL(archivo);
+  });
+  // El selector de archivo se crea aparte de la pantalla: si la pantalla se redibuja mientras la persona
+  // busca la imagen (porque llegaron datos del servidor), la imagen elegida no se pierde
+  LC.A.logoAbrir = () => {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/png,image/jpeg,image/webp'; inp.hidden = true;
+    inp.addEventListener('change', () => { correr(LC.A.logoElegir, {}, inp); inp.remove(); });
+    document.body.appendChild(inp); inp.click();
+  };
+  LC.A.logoElegir = async (d, el) => {
+    const f = el.files[0]; if (!f) return;
+    let logo;
+    try { logo = await achicar(f); } catch (e) { return LC.toast(e.message, 'error'); }
+    return enServidor(null, () => LC.api('catalogo/negocio', { method: 'PATCH', body: { logo } }), 'Logo guardado');
+  };
+  LC.A.logoQuitar = (d, el) => {
+    if (!confirm('¿Quitar el logo?')) return;
+    return enServidor(el, () => LC.api('catalogo/negocio', { method: 'PATCH', body: { logo: null } }), 'Logo quitado');
+  };
 
   /* ---------------- usuarios y permisos (guardados en el servidor) ---------------- */
   let usuariosSrv = null, cargandoUsuarios = false;
@@ -724,6 +811,11 @@
 
   /* ---------------- arranque ---------------- */
   LC.boot = async () => {
+    // El acceso directo del PC de caja abre la app con ?estacion=1: este equipo queda como estación de impresión
+    if (/[?&]estacion=1/.test(location.search)) {
+      try { localStorage.setItem(EST, '1'); } catch (e) { /* sin almacenamiento */ }
+      history.replaceState(null, '', location.pathname);
+    }
     // Si el servidor dice que la sesión venció (clave cambiada, usuario desactivado…), vuelve al ingreso
     LC.onSesionVencida = () => {
       if (!LC.user) return;

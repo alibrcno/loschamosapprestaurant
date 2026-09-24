@@ -118,6 +118,9 @@ legend { font-size: .88rem; font-weight: 600; color: var(--ink-2); margin-bottom
 .inline-label input { width: auto; }
 .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .tabla-scroll { overflow-x: auto; }
+.brand-logo { height: 28px; width: auto; vertical-align: middle; margin-right: 8px; border-radius: 4px; }
+.login-logo { max-width: 140px; max-height: 110px; margin: 0 auto 8px; display: block; }
+.logo-vista { max-width: 200px; max-height: 120px; display: block; margin: 8px 0; }
 .extras-linea { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .chip.sm { padding: 2px 8px; min-height: 28px; font-size: .78rem; }
 .fila-llegada, .fila-material { border-bottom: 1px dashed var(--line, #ddd); padding-bottom: 6px; margin-bottom: 6px; }

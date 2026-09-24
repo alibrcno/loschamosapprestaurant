@@ -9,7 +9,7 @@
 'use strict';
 (function () {
   const LC = (window.LC = window.LC || {});
-  LC.VERSION = '2.6.2';
+  LC.VERSION = '2.7.0';
   LC.TENANT = 'loschamos'; // en fase 2 viene del login (multi-negocio)
   LC.KEY = 'lc2_' + LC.TENANT;
 
@@ -108,7 +108,10 @@
     if (c.vacio) return false; // aún no se ha subido: se sigue usando el menú de este equipo
     const db = LC.db, n = c.negocio, cfg = n.config || {};
     Object.assign(db.config, { negocio: n.nombre, whatsapp: n.whatsapp || '', nit: n.nit || '', direccion: n.direccion || '', telefono: n.telefono || '' });
-    ['mesas', 'ticket', 'valorDomicilio', 'imprimirComandas', 'preparaciones'].forEach((k) => { if (cfg[k] !== undefined) db.config[k] = cfg[k]; });
+    ['mesas', 'ticket', 'valorDomicilio', 'imprimirComandas', 'preparaciones', 'ticketEncabezado', 'ticketPie'].forEach((k) => { if (cfg[k] !== undefined) db.config[k] = cfg[k]; });
+    db.config.logo = n.logo || '';
+    // El logo se recuerda en este equipo para mostrarlo también en la pantalla de ingreso
+    try { if (n.logo) localStorage.setItem('lc2_logo', n.logo); else localStorage.removeItem('lc2_logo'); } catch (e) { /* sin espacio */ }
     db.categorias = ['Pizzas'].concat(c.categorias, ['Bebidas']);
     db.extras = c.extras || {}; // extras por categoría: { Hamburguesas: [{ nombre, precio }] }
     db.productos = c.productos.map((p) => ({ id: p.id, categoria: p.categoria || 'Otros', nombre: p.nombre, precio: p.precio, activo: p.activo }));
@@ -130,7 +133,8 @@
     try {
       await LC.api('catalogo/negocio', { method: 'PATCH', body: {
         nombre: c.negocio, whatsapp: c.whatsapp, nit: c.nit, direccion: c.direccion, telefono: c.telefono,
-        mesas: LC.num(c.mesas) || 8, ticket: LC.num(c.ticket) === 80 ? 80 : 58, valorDomicilio: Math.round(LC.num(c.valorDomicilio)), imprimirComandas: !!c.imprimirComandas
+        mesas: LC.num(c.mesas) || 8, ticket: LC.num(c.ticket) === 58 ? 58 : 80, valorDomicilio: Math.round(LC.num(c.valorDomicilio)) || LC.DOMICILIO_DEFECTO, imprimirComandas: !!c.imprimirComandas,
+        ticketEncabezado: c.ticketEncabezado || '', ticketPie: c.ticketPie || ''
       } });
     } catch (e) { console.warn('No se subieron los datos del negocio', e); }
     await LC.cargarCatalogo();

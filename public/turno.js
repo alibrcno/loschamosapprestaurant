@@ -157,7 +157,11 @@
     ${LC.can('pos.cobrar') ? `<h3 class="sec">Impresora</h3>
     <div class="card"><label class="check"><input type="checkbox" data-ch="estacionCambiar" ${LC.estacionActiva() ? 'checked' : ''}><span>Imprimir en este equipo las comandas, pre-cuentas y recibos</span></label>
       <p class="muted">Actívalo solo en el PC de caja que tiene la impresora, y deja la app abierta ahí.</p>
-      <button class="btn sm" data-a="impresionesVer">Ver impresiones y reimprimir</button></div>` : ''}
+      <div class="actions-grid">
+        <button class="btn sm" data-a="impresionesVer">Ver impresiones y reimprimir</button>
+        <button class="btn sm" data-a="imprimirPrueba">Imprimir prueba</button>
+        <button class="btn sm primary" data-a="accesoCaja">Descargar acceso directo para el PC de caja</button>
+      </div></div>` : ''}
     <h3 class="sec">Personal de hoy</h3>
     <div class="chips static">${t.personal.map((p) => `<span class="chip">${esc(p.nombre)}, ${p.area}</span>`).join('')}</div>
     <h3 class="sec">Gastos, ingresos y traslados</h3>

@@ -428,7 +428,7 @@
   /* ---------- tickets ---------- */
   const cab = () => {
     const c = LC.db.config;
-    return `<div class="c b big">${esc(c.negocio)}</div>${c.nit ? `<div class="c s">NIT ${esc(c.nit)}</div>` : ''}${c.direccion ? `<div class="c s">${esc(c.direccion)}</div>` : ''}${c.telefono ? `<div class="c s">Tel. ${esc(c.telefono)}</div>` : ''}`;
+    return `${c.logo ? `<div class="c"><img src="${esc(c.logo)}" style="max-width:60%;max-height:90px;filter:grayscale(1)" alt=""></div>` : ''}<div class="c b big">${esc(c.negocio)}</div>${c.nit ? `<div class="c s">NIT ${esc(c.nit)}</div>` : ''}${c.direccion ? `<div class="c s">${esc(c.direccion)}</div>` : ''}${c.telefono ? `<div class="c s">Tel. ${esc(c.telefono)}</div>` : ''}${c.ticketEncabezado ? `<div class="c s">${esc(c.ticketEncabezado).replace(/\n/g, '<br>')}</div>` : ''}`;
   };
   function ticketComanda(o, c) {
     const ls = o.lineas.filter((l) => c.lids.includes(l.lid));
@@ -445,7 +445,7 @@
       <div class="hr"></div><div class="r b big"><span>TOTAL</span><span>${LC.fmt(LC.totalOrden(o))}</span></div>
       ${o.pagos.length ? `<div class="hr"></div>${o.pagos.map((x) => `<div class="r"><span>${x.cuenta}</span><span>${LC.fmt(x.monto)}</span></div>`).join('')}
         ${o.cambio ? `<div class="r"><span>Recibido</span><span>${LC.fmt(o.recibido)}</span></div><div class="r b"><span>Cambio</span><span>${LC.fmt(o.cambio)}</span></div>` : ''}` : ''}
-      <div class="hr"></div><div class="c s">${o.pagos.length ? 'Gracias por tu compra' : 'Documento informativo, no es factura'}</div>`;
+      <div class="hr"></div><div class="c s">${o.pagos.length ? esc(LC.db.config.ticketPie || 'Gracias por tu compra').replace(/\n/g, '<br>') : 'Documento informativo, no es factura'}</div>${!o.pagos.length && LC.db.config.ticketPie ? `<div class="c s">${esc(LC.db.config.ticketPie).replace(/\n/g, '<br>')}</div>` : ''}`;
   }
   function ticketDomicilio(o) {
     return `${cab()}<div class="hr"></div><div class="c b big">DOMICILIO #${pad3(o.numero)}</div>

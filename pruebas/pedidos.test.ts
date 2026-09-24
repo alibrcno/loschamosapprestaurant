@@ -192,6 +192,19 @@ describe('API: pedidos de varias meseras e impresión en caja', () => {
     assert.equal((await llamar('impresion', 'GET', undefined, enc)).datos.trabajos.length, 6);
   });
 
+  test('Logo y tickets del negocio: solo quien edita el menú, y solo imágenes', async () => {
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+    assert.equal((await llamar('catalogo/negocio', 'PATCH', { logo: png }, enc)).status, 403);
+    assert.equal((await llamar('catalogo/negocio', 'PATCH', { logo: 'javascript:alert(1)' }, admin)).status, 400, 'no se acepta algo que no sea imagen');
+    assert.equal((await llamar('catalogo/negocio', 'PATCH', { logo: 'data:image/png;base64,' + 'A'.repeat(130000) }, admin)).status, 400, 'ni una imagen muy pesada');
+    assert.equal((await llamar('catalogo/negocio', 'PATCH', { logo: png }, admin)).status, 200);
+    const cat = (await llamar('catalogo', 'GET', undefined, mesera1)).datos;
+    assert.equal(cat.negocio.logo, png, 'todos los equipos ven el logo');
+    assert.equal(cat.negocio.whatsapp, '573001112266', 'subir el logo no cambia los demás datos');
+    assert.equal((await llamar('catalogo/negocio', 'PATCH', { logo: null }, admin)).status, 200);
+    assert.equal((await llamar('catalogo', 'GET', undefined, mesera1)).datos.negocio.logo, null, 'y se puede quitar');
+  });
+
   test('Almacén del dueño: entra con su precio, sale al stock del día y no se borra', async () => {
     assert.equal((await llamar('almacen', 'GET', undefined, enc)).status, 403, 'la encargada no ve el almacén');
     assert.equal((await llamar('almacen', 'POST', { accion: 'entrada', itemId: ids.c, cantidad: 10 }, enc)).status, 403);
