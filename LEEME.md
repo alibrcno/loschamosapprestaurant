@@ -43,6 +43,10 @@ Los datos de la versión anterior (bebidas, utensilios, insumos) se importan sol
 
 **Cierre de caja (encargada).** No deja cerrar con cuentas abiertas. Conteo de bebidas y utensilios → arqueo → resumen: ventas por medio de pago, lo que debería haber vs. lo contado, bebidas vendidas por conteo vs. registradas en el POS (⚠️ si no coinciden) y lista de compras. Si hay diferencias exige observación. El aviso del cierre de caja le llega al dueño por Telegram y correo; las compras de cocina y el resultado del día (utilidad) llegan en el reporte final, cuando cierra el último (normalmente cocina). Ese reporte trae también qué preparar, qué sacar del almacén antes de comprar, el avalúo del almacén y cómo va la semana. Si cocina no lo hace, la encargada puede terminar el turno "sin inventario de cocina" explicando por qué.
 
+**Foto de la factura y aumentos.** Al registrar mercancía se puede tomar la foto de la factura (se guarda 15 días, se ve con "📷 Ver factura"). Si algo llega más caro que la última vez (con el valor escrito), al dueño le llega un aviso por Telegram y correo y queda en Reportes → Cuentas → "Llegó más caro"; para bebidas sugiere el nuevo precio de venta y se aplica con un botón.
+
+**Reiniciar a 0.** Ajustes → Datos → "Reiniciar el restaurante a 0": solo el administrador, con la clave de reinicio (variable `CLAVE_REINICIO` en Vercel) y sin turno abierto. Borra ventas, turnos, dinero y movimientos; conserva usuarios, menú y configuración. Antes, haz la copia en Neon (Branches → Create branch).
+
 **Logo y tickets.** En Ajustes → Negocio se sube el logo (sale en la app y en los tickets) y se escribe el encabezado y el mensaje del final de la cuenta.
 
 **Almacén del dueño (solo administrador).** Lo que guardas aparte con su precio (avalúo). La encargada no lo cuenta: solo entra al stock del día cuando tú lo sacas al turno. Si una compra sugerida ya está en el almacén, el reporte dice "saca 3 y compra 1".

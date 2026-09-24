@@ -9,7 +9,7 @@ export DATABASE_URL="postgresql://app_user@localhost:${PGPORT:-5432}/loschamos_p
 rm -rf .build && npx tsc -p tsconfig.json
 # Arranca el servidor local (imita a Vercel) con la base de pruebas
 arrancar() {
-  HORA_APERTURA_COCINA=0 CLAVE_INSTALACION=frase-de-prueba-larga node pruebas/navegador/servidor-local.js "$PWD" > /tmp/lc-servidor.log 2>&1 &
+  HORA_APERTURA_COCINA=0 CLAVE_REINICIO=clave-de-reinicio-prueba CLAVE_INSTALACION=frase-de-prueba-larga node pruebas/navegador/servidor-local.js "$PWD" > /tmp/lc-servidor.log 2>&1 &
   SERVIDOR=$!
   trap 'kill $SERVIDOR 2>/dev/null || true' EXIT
   sleep 1

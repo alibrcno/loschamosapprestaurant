@@ -226,8 +226,24 @@ describe('API: pedidos de varias meseras e impresión en caja', () => {
     assert.deepEqual(m.datos.movimientos.map((x: any) => x.tipo), ['ajuste', 'salida', 'entrada']);
   });
 
+  test('Factura con foto; si algo llega más caro, avisa y sugiere el precio de venta', async () => {
+    const foto = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
+    assert.equal((await llamar('turno/llegada', 'POST', { items: [{ itemId: ids.c, cantidad: 10, costo: 30000 }], foto: 'javascript:1' }, enc)).status, 400, 'solo imágenes');
+    // La Coca-Cola costaba $2.500 (última compra); ahora llegan 10 por $30.000 = $3.000 cada una
+    const r = await llamar('turno/llegada', 'POST', { items: [{ itemId: ids.c, cantidad: 10, costo: 30000 }], nota: 'Postobón, factura 88', foto }, enc);
+    assert.equal(r.status, 201);
+    assert.deepEqual(r.datos.aumentos.map((a: any) => [a.nombre, a.antes, a.ahora, a.pct]), [['Coca-Cola', 2500, 3000, 20]]);
+    const fotoId = r.datos.entradas.find((e: any) => e.nota === 'Postobón, factura 88').fotoId;
+    assert.ok(fotoId, 'la llegada queda unida a la foto de su factura');
+    assert.equal((await llamar('fotos?id=' + fotoId, 'GET', undefined, mesera1)).status, 403, 'la mesera no ve facturas');
+    assert.equal((await llamar('fotos?id=' + fotoId, 'GET', undefined, admin)).datos.imagen, foto);
+    const au = await llamar('aumentos', 'GET', undefined, admin);
+    assert.equal(au.datos.aumentos[0].precioSugerido, 4800, 'se vendía a $4.000 con costo $2.500: para el mismo margen, $4.800');
+    assert.equal((await llamar('aumentos', 'GET', undefined, enc)).status, 403, 'solo el dueño ve los aumentos');
+  });
+
   test('No se cierra la caja con cuentas abiertas; lo vendido va al resumen', async () => {
-    const cierre = { bebidas: { [ids.c]: 25 }, utensilios: {}, saldos: { Efectivo: 35000, Nequi: 30000, Bancolombia: 0, 'Datáfono': 0 } };
+    const cierre = { bebidas: { [ids.c]: 35 }, utensilios: {}, saldos: { Efectivo: 35000, Nequi: 30000, Bancolombia: 0, 'Datáfono': 0 } };
     const r = await llamar('turno/cerrar-caja', 'POST', cierre, enc);
     assert.equal(r.status, 409, 'el domicilio sigue abierto');
     const dom = (await llamar('pedidos', 'GET', undefined, enc)).datos.ordenes.find((o: any) => o.tipo === 'domicilio');
@@ -244,7 +260,34 @@ describe('API: pedidos de varias meseras e impresión en caja', () => {
     assert.equal(res.anulaciones, 4, 'dos hamburguesas anuladas y dos cuentas liberadas');
     assert.equal(res.bebidas[0].pos, 2);
     assert.equal(res.bebidas[0].dif, 0, 'salieron 2 Coca-Cola del inventario y se cobraron 2');
-    assert.equal(res.bebidas[0].ent, 3, 'las 3 que salieron del almacén cuentan como llegada');
+    assert.equal(res.bebidas[0].ent, 13, 'las 3 que salieron del almacén y las 10 de la factura cuentan como llegada');
     assert.equal(res.bebidas[0].almacen, 6, 'el resumen dice cuántas hay en el almacén');
+  });
+
+  test('Reiniciar a 0: solo el administrador, con la clave de reinicio y sin turno abierto', async () => {
+    const pedir = (cookie: string, datos: object) => llamar('reiniciar', 'POST', datos, cookie);
+    delete process.env.CLAVE_REINICIO;
+    assert.deepEqual((await llamar('reiniciar', 'GET', undefined, admin)).datos, { disponible: false }, 'sin la variable en Vercel, el botón está apagado');
+    assert.equal((await pedir(admin, { clave: 'x', confirmacion: 'REINICIAR' })).status, 403);
+    process.env.CLAVE_REINICIO = 'clave-de-reinicio';
+    assert.deepEqual((await llamar('reiniciar', 'GET', undefined, admin)).datos, { disponible: true });
+    assert.equal((await pedir(enc, { clave: 'clave-de-reinicio', confirmacion: 'REINICIAR' })).status, 403, 'la encargada no puede');
+    assert.equal((await pedir(admin, { clave: 'clave-de-reinicio' })).status, 400, 'hay que escribir REINICIAR');
+    assert.equal((await pedir(admin, { clave: 'otra', confirmacion: 'REINICIAR' })).status, 403, 'clave equivocada');
+    assert.equal((await pedir(admin, { clave: 'clave-de-reinicio', confirmacion: 'REINICIAR' })).status, 409, 'el turno sigue abierto (esperando a cocina)');
+    await llamar('turno/terminar-sin-cocina', 'POST', { motivo: 'Prueba' }, enc);
+    const r = await pedir(admin, { clave: 'clave-de-reinicio', confirmacion: 'REINICIAR' });
+    assert.equal(r.status, 200);
+    assert.ok(r.datos.antes.turnos >= 1 && r.datos.antes.fotos === 1);
+    const t = (await llamar('turno', 'GET', undefined, admin)).datos;
+    assert.equal(t.turnos.length, 0);
+    assert.ok(Object.values(t.saldos).every((x) => x === 0), 'las cuentas quedan en $0');
+    const cat = (await llamar('catalogo', 'GET', undefined, admin)).datos;
+    assert.ok(cat.productos.length === 1 && cat.inventario.bebidas[0].stock === 0, 'el menú se conserva y el stock queda en 0');
+    const aud = (await llamar('auditoria', 'GET', undefined, admin)).datos.auditoria;
+    assert.deepEqual(aud.map((a: any) => a.accion), ['Restaurante reiniciado a 0'], 'la auditoría empieza con el reinicio');
+    for (let i = 0; i < 5; i++) await pedir(admin, { clave: 'mala', confirmacion: 'REINICIAR' });
+    assert.equal((await pedir(admin, { clave: 'clave-de-reinicio', confirmacion: 'REINICIAR' })).status, 429, 'tras 5 claves equivocadas se bloquea 15 minutos');
+    delete process.env.CLAVE_REINICIO;
   });
 });

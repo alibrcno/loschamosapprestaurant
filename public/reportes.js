@@ -38,9 +38,35 @@
         <div class="stat"><span>Ticket promedio</span><strong class="num">${LC.fmt(r.ticketProm)}</strong></div>
       </div>
       <table class="tbl"><thead><tr><th>Cuenta</th><th>Ventas del turno</th></tr></thead><tbody>${LC.CUENTAS.map((c) => `<tr><td>${c}</td><td>${LC.fmt(r.ventasCuenta[c])}</td></tr>`).join('')}</tbody></table>` : ''}
+    ${aumentosHTML()}
     <h3 class="sec">Por debajo del stock sugerido</h3>
     ${bajos.length ? `<table class="tbl"><thead><tr><th>Ítem</th><th>Hay</th><th>Sugerido</th></tr></thead><tbody>${bajos.map(({ tp, it }) => `<tr><td>${esc(it.nombre)} <small>${LC.INV[tp]}</small></td><td class="neg">${LC.q(it.stock)}</td><td>${LC.q(it.sugerido)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Todo está sobre el stock sugerido.</p>'}`;
   }
+
+  // Lo que llegó más caro en los últimos 15 días (lo detecta el servidor al registrar cada factura)
+  let aumSrv = null, cargandoAum = false;
+  function aumentosHTML() {
+    if (!aumSrv) {
+      if (!cargandoAum) { cargandoAum = true; LC.api('aumentos').then((r) => { aumSrv = r.aumentos; if (LC.state.view === 'reportes') LC.render(); }).catch(() => {}).finally(() => { cargandoAum = false; }); }
+      return '';
+    }
+    const l = aumSrv; aumSrv = null; // la próxima vez se vuelve a pedir
+    if (!l.length) return '<h3 class="sec">Llegó más caro</h3><p class="muted">Nada llegó más caro en los últimos 15 días.</p>';
+    return `<h3 class="sec">⚠️ Llegó más caro (últimos 15 días)</h3><div class="card">${l.map((a) => `<div class="mov"><div>
+      <strong>${esc(a.nombre)}: ${LC.fmt(a.antes)} → ${LC.fmt(a.ahora)} por ${esc(a.unidad)} (+${LC.q(a.pct)} %)</strong>
+      <small>${LC.fecha(a.fecha)}, registró ${esc(a.usuario)}. ${a.tipo === 'bebida' ? `Se vende a ${LC.fmt(a.precio)}.` : 'Revisa el precio de los platos que lo usan.'}</small></div>
+      ${a.precioSugerido && LC.can('catalogo.editar') ? `<button class="btn sm" data-a="precioSubir" data-id="${a.itemId}" data-p="${a.precioSugerido}">Subir precio a ${LC.fmt(a.precioSugerido)}</button>` : ''}</div>`).join('')}</div>`;
+  }
+  LC.A.precioSubir = async (d, el) => {
+    const b = LC.db.bebidas.find((x) => x.id === d.id); if (!b) return;
+    if (!confirm(`¿Vender ${b.nombre} a ${LC.fmt(+d.p)}? (hoy ${LC.fmt(b.precio)})`)) return;
+    el.disabled = true;
+    try {
+      await LC.api('catalogo/inventario', { method: 'PATCH', body: { id: b.id, nombre: b.nombre, unidad: b.unidad, precio: +d.p, costo: LC.num(b.costo), sugerido: LC.num(b.sugerido) } });
+      await LC.cargarCatalogo();
+    } catch (e) { el.disabled = false; return LC.toast(e.message, 'error'); }
+    LC.toast(`${b.nombre} ahora se vende a ${LC.fmt(+d.p)}`); LC.render();
+  };
 
   function turnos() {
     const ts = LC.db.turnos.filter((t) => t.estado === 'cerrado').slice().reverse();

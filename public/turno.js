@@ -167,7 +167,7 @@
     <h3 class="sec">Gastos, ingresos y traslados</h3>
     <div class="card">${movs.length ? movs.map((m) => `<div class="mov"><div><strong>${esc(m.concepto)}</strong><small>${LC.hora(m.fecha)}, ${esc(m.cuenta)}, ${esc(m.usuario)}</small></div><span class="num ${m.monto < 0 ? 'neg' : 'pos'}">${LC.fmt(m.monto)}</span></div>`).join('') : '<p class="muted">Sin movimientos todavía.</p>'}</div>
     <h3 class="sec">Mercancía recibida</h3>
-    <div class="card">${ents.length ? ents.map((e) => `<div class="mov"><div><strong>${esc(e.nombre)}: +${LC.q(e.cantidad)} ${esc(e.unidad)}</strong><small>${LC.hora(e.fecha)}, ${esc(e.usuario)}${e.nota ? ', ' + esc(e.nota) : ''}</small></div><span class="num">${e.costo ? LC.fmt(e.costo) : ''}</span></div>`).join('') : '<p class="muted">No ha llegado mercancía en este turno.</p>'}</div>`;
+    <div class="card">${ents.length ? ents.map((e) => `<div class="mov"><div><strong>${esc(e.nombre)}: +${LC.q(e.cantidad)} ${esc(e.unidad)}</strong><small>${LC.hora(e.fecha)}, ${esc(e.usuario)}${e.nota ? ', ' + esc(e.nota) : ''}${verFoto(e)}</small></div><span class="num">${e.costo ? LC.fmt(e.costo) : ''}</span></div>`).join('') : '<p class="muted">No ha llegado mercancía en este turno.</p>'}</div>`;
   };
 
   LC.A.movNuevo = (d) => {
@@ -226,8 +226,22 @@
       </select></label>
       <label>Cantidad o peso<input type="number" name="cantidad" min="0.01" step="any" inputmode="decimal" required></label>
       <label>Valor (opcional)<input type="number" name="costo" min="0" step="1" inputmode="numeric"></label></div>`;
+  let fotoFactura = null; // foto achicada de la factura que se está registrando
+  LC.A.facturaFoto = () => LC.elegirArchivo('image/*', async (d, inp) => {
+    const f = inp.files[0]; if (!f) return;
+    try { fotoFactura = await LC.achicarImagen(f, 1280, true); } catch (e) { return LC.toast(e.message, 'error'); }
+    const v = document.getElementById('foto-vista');
+    if (v) v.innerHTML = `<img src="${fotoFactura}" alt="Foto de la factura" class="foto-mini">`;
+  }, true);
+  LC.A.fotoVer = async (d) => {
+    let r;
+    try { r = await LC.api('fotos?id=' + encodeURIComponent(d.id)); } catch (e) { return LC.toast(e.message, 'error'); }
+    LC.modal(`${LC.modalHead('Foto de la factura')}<img src="${r.imagen}" alt="Factura" style="width:100%;height:auto"><p class="muted">Tomada ${LC.fechaHora(r.creadoEn)}. Se borra a los 15 días.</p>`, true);
+  };
+  const verFoto = (e) => (e.fotoId ? ` <button class="link" data-a="fotoVer" data-id="${e.fotoId}">📷 Ver factura</button>` : '');
   LC.A.entradaNueva = (d) => {
     if (!turnoParaLlegadas()) return LC.toast('Primero hay que abrir el turno (cocina o caja)', 'error');
+    fotoFactura = null;
     const tipos = [];
     if (LC.can('inventario.entradas')) tipos.push('bebidas', 'utensilios', 'insumos');
     else if (LC.can('cocina.inventario')) tipos.push('insumos');
@@ -240,6 +254,8 @@
         <button type="button" class="btn sm" data-a="entradaFila">+ Otro artículo</button>
         ${caja ? `<label>Se pagó desde<select name="cuenta"><option value="">No se pagó de la caja (crédito o lo pagó el dueño)</option>${LC.CUENTAS.map((c) => `<option>${c}</option>`).join('')}</select></label>` : ''}
         <label>Proveedor o factura<input name="nota" placeholder="Ej. Postobón, factura 1234"></label>
+        <div class="foto-factura"><button type="button" class="btn" data-a="facturaFoto">📷 Foto de la factura (opcional)</button><span id="foto-vista"></span></div>
+        <p class="muted">La foto se guarda 15 días. Si algo llegó más caro que la última vez, al dueño le llega un aviso.</p>
         <button class="btn primary lg block">Registrar llegada</button>
       </form>`, true);
   };
@@ -249,7 +265,7 @@
     nueva.querySelectorAll('input, select').forEach((x) => (x.value = ''));
     cont.appendChild(nueva);
   };
-  LC.A.entradaGuardar = (d, f) => {
+  LC.A.entradaGuardar = async (d, f) => {
     if (!turnoParaLlegadas()) return;
     const items = [];
     for (const fila of f.querySelectorAll('.fila-llegada')) {
@@ -261,7 +277,15 @@
       items.push({ itemId: sel.split('|')[1], cantidad: cant, costo });
     }
     if (!items.length) return LC.toast('Elige al menos un artículo', 'error');
-    return enviar(f, 'llegada', { items, cuenta: d.cuenta || null, nota: (d.nota || '').trim() }, items.length === 1 ? 'Llegada registrada' : `${items.length} artículos registrados`);
+    const btn = f.querySelector('button.primary'); btn.disabled = true;
+    let r;
+    try { r = await LC.accionTurno('llegada', { items, cuenta: d.cuenta || null, nota: (d.nota || '').trim(), foto: fotoFactura }); }
+    catch (e) { btn.disabled = false; return LC.toast(e.message, 'error'); }
+    fotoFactura = null;
+    LC.cerrarModal(); LC.render();
+    const msg = items.length === 1 ? 'Llegada registrada' : `${items.length} artículos registrados`;
+    // Si algo llegó más caro, se dice aquí también (al dueño le llega el aviso por Telegram y correo)
+    LC.toast(r.aumentos && r.aumentos.length ? `${msg}. ⚠️ Llegó más caro: ${r.aumentos.map((a) => `${a.nombre} (+${LC.q(a.pct)} %)`).join(', ')}` : msg, r.aumentos && r.aumentos.length ? 'error' : 'ok');
   };
   LC.A.cocinaAbrir = async (d, el) => {
     el.disabled = true;
@@ -292,7 +316,7 @@
     ${LC.db.insumos.map((i) => { const ini = LC.num(t.apertura.insumos[i.id]), e = LC.num(ent[i.id]); return `<tr><td>${esc(i.nombre)} <small>${esc(i.unidad)}</small></td><td>${LC.q(ini)}</td><td>${e ? '+' + LC.q(e) : ''}</td><td><strong>${LC.q(ini + e)}</strong></td></tr>`; }).join('')}
     </tbody></table>
     <h3 class="sec">Llegadas registradas</h3>
-    <div class="card">${lista.length ? lista.map((e) => `<div class="mov"><div><strong>${esc(e.nombre)}: +${LC.q(e.cantidad)} ${esc(e.unidad)}</strong><small>${LC.hora(e.fecha)}, ${esc(e.usuario)}${e.nota ? ', ' + esc(e.nota) : ''}</small></div></div>`).join('') : '<p class="muted">Todavía no llega nada en este turno.</p>'}</div>`;
+    <div class="card">${lista.length ? lista.map((e) => `<div class="mov"><div><strong>${esc(e.nombre)}: +${LC.q(e.cantidad)} ${esc(e.unidad)}</strong><small>${LC.hora(e.fecha)}, ${esc(e.usuario)}${e.nota ? ', ' + esc(e.nota) : ''}${verFoto(e)}</small></div></div>`).join('') : '<p class="muted">Todavía no llega nada en este turno.</p>'}</div>`;
   };
 
   LC.V.cocinaCierre = () => {

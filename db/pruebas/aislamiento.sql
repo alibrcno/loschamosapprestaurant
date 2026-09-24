@@ -157,5 +157,28 @@ SELECT pg_temp.ok((SELECT count(*) FROM print_jobs) = 0, 'Chamos B no ve las imp
 SELECT pg_temp.ok((SELECT count(*) FROM warehouse_moves) = 0, 'Chamos B no ve el almacén de Chamos A');
 ROLLBACK;
 
+\echo '--- Reiniciar a 0: solo con la función, solo el negocio fijado, sin turno abierto ---'
+BEGIN;
+SELECT set_config('app.tenant_id', :'ta', true) \gset
+SELECT set_config('app.reiniciando', 'si', true) \gset
+SELECT pg_temp.debe_fallar($$DELETE FROM ledger_entries$$, 'app_user no borra el libro aunque intente usar la puerta del reinicio');
+SELECT pg_temp.debe_fallar($$DELETE FROM audit_log$$, 'ni la auditoría');
+SELECT set_config('app.reiniciando', '', true) \gset
+INSERT INTO shifts (tenant_id, abierto_por) SELECT current_tenant(), id FROM users LIMIT 1;
+SELECT pg_temp.debe_fallar($$SELECT reiniciar_negocio()$$, 'No se reinicia con un turno abierto');
+ROLLBACK;
+BEGIN;
+SELECT set_config('app.tenant_id', :'ta', true) \gset
+INSERT INTO invoice_photos (tenant_id, imagen) VALUES (current_tenant(), 'data:image/jpeg;base64,AAAA');
+SELECT pg_temp.debe_fallar($$INSERT INTO invoice_photos (tenant_id, imagen) VALUES (current_tenant(), 'javascript:alert(1)')$$, 'La foto de factura solo acepta imágenes');
+SELECT pg_temp.ok((reiniciar_negocio()->>'movimientos')::int = 1, 'Chamos A se reinicia (tenía 1 movimiento)');
+SELECT pg_temp.ok((SELECT count(*) FROM ledger_entries) = 0 AND (SELECT count(*) FROM invoice_photos) = 0 AND (SELECT coalesce(sum(saldo), 0) FROM account_balances) = 0, 'Chamos A queda en 0: sin movimientos, sin fotos y con las cuentas en $0');
+SELECT pg_temp.ok((SELECT count(*) FROM accounts) = 4 AND (SELECT count(*) FROM users) = 1, 'Sus cuentas y usuarios se conservan');
+SELECT pg_temp.ok(current_setting('app.reiniciando', true) = '', 'La puerta del reinicio se vuelve a cerrar');
+SELECT pg_temp.debe_fallar($$DELETE FROM ledger_entries$$, 'Después del reinicio el libro vuelve a estar protegido');
+SELECT set_config('app.tenant_id', :'tb', true) \gset
+SELECT pg_temp.ok((SELECT count(*) FROM ledger_entries) = 1, 'El reinicio de Chamos A no tocó el libro de Chamos B');
+ROLLBACK;
+
 \echo ''
 \echo '🎉 Todas las pruebas de seguridad pasaron'

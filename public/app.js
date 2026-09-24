@@ -673,15 +673,16 @@
     LC.log('Configuración editada');
   }, 'Guardado');
   // Logo: se achica en el equipo (máximo 320 px) antes de subirlo, así pesa poco
-  const achicar = (archivo) => new Promise((ok, mal) => {
+  // Achica una imagen en el equipo antes de subirla (logo, foto de factura)
+  LC.achicarImagen = (archivo, max = 320, jpeg = false) => new Promise((ok, mal) => {
     const img = new Image();
     img.onload = () => {
-      const k = Math.min(1, 320 / Math.max(img.width, img.height));
+      const k = Math.min(1, max / Math.max(img.width, img.height));
       const cv = document.createElement('canvas');
       cv.width = Math.max(1, Math.round(img.width * k)); cv.height = Math.max(1, Math.round(img.height * k));
       cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-      let url = cv.toDataURL('image/png');
-      if (url.length > 110000) url = cv.toDataURL('image/jpeg', 0.85);
+      let url = jpeg ? cv.toDataURL('image/jpeg', 0.7) : cv.toDataURL('image/png');
+      if (url.length > (jpeg ? 650000 : 110000)) url = cv.toDataURL('image/jpeg', jpeg ? 0.5 : 0.85);
       URL.revokeObjectURL(img.src); ok(url);
     };
     img.onerror = () => mal(new Error('No se pudo leer la imagen'));
@@ -689,16 +690,18 @@
   });
   // El selector de archivo se crea aparte de la pantalla: si la pantalla se redibuja mientras la persona
   // busca la imagen (porque llegaron datos del servidor), la imagen elegida no se pierde
-  LC.A.logoAbrir = () => {
+  LC.elegirArchivo = (accept, fn, camara) => {
     const inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = 'image/png,image/jpeg,image/webp'; inp.hidden = true;
-    inp.addEventListener('change', () => { correr(LC.A.logoElegir, {}, inp); inp.remove(); });
+    inp.type = 'file'; inp.accept = accept; inp.hidden = true;
+    if (camara) inp.setAttribute('capture', 'environment'); // en el celular abre la cámara
+    inp.addEventListener('change', () => { correr(fn, {}, inp); inp.remove(); });
     document.body.appendChild(inp); inp.click();
   };
+  LC.A.logoAbrir = () => LC.elegirArchivo('image/png,image/jpeg,image/webp', LC.A.logoElegir);
   LC.A.logoElegir = async (d, el) => {
     const f = el.files[0]; if (!f) return;
     let logo;
-    try { logo = await achicar(f); } catch (e) { return LC.toast(e.message, 'error'); }
+    try { logo = await LC.achicarImagen(f); } catch (e) { return LC.toast(e.message, 'error'); }
     return enServidor(null, () => LC.api('catalogo/negocio', { method: 'PATCH', body: { logo } }), 'Logo guardado');
   };
   LC.A.logoQuitar = (d, el) => {
@@ -769,44 +772,51 @@
   };
 
   /* ---------------- respaldo de datos ---------------- */
+  // Datos: copia de seguridad (en Neon), reinicio del restaurante a 0 y limpiar la memoria de este equipo
+  let reinicioDisponible = null;
   function tabDatos() {
+    if (reinicioDisponible === null) {
+      reinicioDisponible = false;
+      LC.api('reiniciar').then((r) => { reinicioDisponible = r.disponible; if (LC.state.view === 'ajustes') LC.render(); }).catch(() => {});
+    }
     return `<div class="card form">
-      <h3>Respaldo</h3>
-      <p class="muted">Mientras la app funcione sin servidor, los datos viven solo en este dispositivo. Descarga un respaldo cada semana.</p>
-      <button class="btn primary" data-a="exportar">Descargar respaldo</button>
-      <label>Restaurar desde un respaldo<input type="file" accept="application/json" data-ch="importar"></label>
+      <h3>Copia de seguridad</h3>
+      <p class="muted">Todo se guarda en el servidor. Para tener una copia exacta de un momento: en Neon → Branches → <strong>Create branch</strong> desde "production", con la fecha como nombre. Hazla antes de reiniciar y de vez en cuando.</p>
     </div>
-    <div class="card form danger-zone">
-      <h3>Borrar todo</h3>
-      <p class="muted">Elimina usuarios, ventas, turnos e inventarios de este dispositivo.</p>
-      <button class="btn danger" data-a="reiniciar">Borrar todos los datos</button>
+    ${LC.user.rol === 'admin' ? `<div class="card form danger-zone">
+      <h3>Reiniciar el restaurante a 0</h3>
+      <p class="muted">Borra turnos, ventas, pedidos, movimientos de dinero, auditoría, almacén, fotos e impresiones, y deja el stock en 0. Se conservan los usuarios, las cuentas, el menú, los extras, las preparaciones, el logo y los avisos. <strong>No se puede deshacer.</strong></p>
+      ${reinicioDisponible
+        ? '<button class="btn danger" data-a="reinicioAbrir">Reiniciar el restaurante a 0</button>'
+        : '<p class="muted">Apagado. Para encenderlo, pon la variable <strong>CLAVE_REINICIO</strong> en Vercel (Settings → Environment Variables) y vuelve a publicar. Bórrala cuando ya no lo necesites.</p>'}
+    </div>` : ''}
+    <div class="card form">
+      <h3>Memoria de este equipo</h3>
+      <p class="muted">Borra solo lo guardado en este navegador (pedidos sin enviar, preferencias). No toca nada del servidor.</p>
+      <button class="btn ghost" data-a="memoriaBorrar">Borrar la memoria de este equipo</button>
     </div>`;
   }
-  LC.A.exportar = () => {
-    const blob = new Blob([JSON.stringify(LC.db, null, 1)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `loschamos-respaldo-${LC.diaLocal()}.json`;
-    document.body.appendChild(a); a.click(); a.remove();
-    LC.log('Respaldo descargado'); LC.save();
+  LC.A.reinicioAbrir = () => LC.modal(`${LC.modalHead('Reiniciar el restaurante a 0')}
+    <form class="form" data-submit="reinicioConfirmar">
+      <div class="notice bad">Se borran todas las ventas, turnos, dinero y movimientos. No se puede deshacer. Haz primero la copia en Neon.</div>
+      <label>Clave de reinicio<input type="password" name="clave" required autocomplete="off"></label>
+      <label>Escribe REINICIAR para confirmar<input name="confirmacion" required autocomplete="off" autocapitalize="characters"></label>
+      <button class="btn danger block">Reiniciar a 0</button>
+    </form>`);
+  LC.A.reinicioConfirmar = async (d, f) => {
+    if (d.confirmacion.trim() !== 'REINICIAR') return LC.toast('Escribe REINICIAR en mayúsculas', 'error');
+    const btn = f.querySelector('button.danger'); btn.disabled = true;
+    try { await LC.api('reiniciar', { method: 'POST', body: { clave: d.clave, confirmacion: 'REINICIAR' } }); }
+    catch (e) { btn.disabled = false; return LC.toast(e.message, 'error'); }
+    try { await LC.cargarTurno(); await LC.cargarPedidos(true); await LC.cargarCatalogo(); } catch (e) { /* se recarga al navegar */ }
+    LC.db.auditoria = [];
+    LC.save();
+    LC.cerrarModal(); LC.toast('Listo: el restaurante quedó en 0'); LC.go('inicio');
   };
-  LC.A.importar = (d, el) => {
-    const file = el.files[0]; if (!file) return;
-    const rd = new FileReader();
-    rd.onload = () => {
-      try {
-        const data = JSON.parse(rd.result);
-        if (!Array.isArray(data.usuarios) || !data.config) throw new Error('El archivo no es un respaldo válido');
-        if (!confirm('Esto reemplaza todos los datos actuales por los del respaldo. ¿Continuar?')) return;
-        LC.db = LC.normalizar(data); LC.save(); LC.A.salir();
-        LC.toast('Respaldo restaurado. Ingresa de nuevo.');
-      } catch (e) { LC.toast(e.message, 'error'); }
-    };
-    rd.readAsText(file);
-  };
-  LC.A.reiniciar = () => {
-    if (prompt('Escribe BORRAR para eliminar todos los datos') !== 'BORRAR') return;
-    localStorage.removeItem(LC.KEY); location.reload();
+  LC.A.memoriaBorrar = () => {
+    if (!confirm('¿Borrar la memoria de este equipo? Los pedidos sin enviar de este equipo se pierden.')) return;
+    try { localStorage.removeItem(LC.KEY); } catch (e) { /* sin almacenamiento */ }
+    location.reload();
   };
 
   /* ---------------- arranque ---------------- */

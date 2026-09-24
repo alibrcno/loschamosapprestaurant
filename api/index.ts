@@ -16,11 +16,14 @@ import * as pizzas from './_rutas/catalogo/pizzas';
 import * as preparaciones from './_rutas/catalogo/preparaciones';
 import * as productos from './_rutas/catalogo/productos';
 import * as almacen from './_rutas/almacen';
+import * as aumentos from './_rutas/aumentos';
 import * as auditoria from './_rutas/auditoria';
 import * as avisos from './_rutas/avisos';
 import * as equipo from './_rutas/equipo';
+import * as fotos from './_rutas/fotos';
 import * as impresion from './_rutas/impresion';
 import * as pedidos from './_rutas/pedidos';
+import * as reiniciar from './_rutas/reiniciar';
 import * as salud from './_rutas/salud';
 import * as turnoAbrir from './_rutas/turno/abrir';
 import * as turnoAbrirCocina from './_rutas/turno/abrir-cocina';
@@ -52,11 +55,14 @@ export const RUTAS: Record<string, Modulo> = {
   'catalogo/preparaciones': preparaciones,
   'catalogo/productos': productos,
   almacen,
+  aumentos,
   auditoria,
   avisos,
   equipo,
+  fotos,
   impresion,
   pedidos,
+  reiniciar,
   salud,
   turno: turnoEstado,
   'turno/abrir': turnoAbrir,

@@ -63,11 +63,18 @@ const ok = (c, m) => { console.log(c ? '✅' : '❌', m); if (!c) process.exitCo
   await c.click('[data-a=entradaNueva][data-solo=insumos]');
   ok(!(await c.$('.modal select[name=cuenta]')), 'Cocina no elige de qué cuenta se pagó la factura');
   await c.selectOption('.modal .fila-llegada >> nth=0 >> select', 'insumos|' + idQueso); await c.fill('.modal .fila-llegada >> nth=0 >> [name=cantidad]', '3');
+  await c.fill('.modal .fila-llegada >> nth=0 >> [name=costo]', '90000'); // antes $24.000 el kilo, ahora $30.000
   await c.click('.modal [data-a=entradaFila]');
   await c.selectOption('.modal .fila-llegada >> nth=1 >> select', 'insumos|' + idTomate); await c.fill('.modal .fila-llegada >> nth=1 >> [name=cantidad]', '2');
   await c.fill('.modal input[name=nota]', 'Lácteos, factura 55');
+  // Foto de la factura con la cámara del celular (aquí, una imagen de prueba)
+  const [selector] = await Promise.all([c.waitForEvent('filechooser'), c.click('.modal [data-a=facturaFoto]')]);
+  await selector.setFiles({ name: 'factura.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64') });
+  await c.waitForSelector('.modal .foto-mini');
   await c.click('.modal button.primary');
-  ok((await toast(c)) === '2 artículos registrados', 'Cocina registra una factura con 2 artículos');
+  const tl = await toast(c);
+  ok(tl.startsWith('2 artículos registrados') && tl.includes('Llegó más caro: Queso mozzarella (+25 %)'), 'Cocina registra una factura con 2 artículos y foto; avisa que el queso llegó más caro: "' + tl + '"');
+  ok(!!(await c.$('[data-a=fotoVer]')), 'La llegada queda con "📷 Ver factura"');
 
   // ---- La mesera todavía no puede vender ----
   const m = await nuevo('UTC', true);
@@ -167,6 +174,10 @@ const ok = (c, m) => { console.log(c ? '✅' : '❌', m); if (!c) process.exitCo
   await c.fill('textarea[name=obs]', 'Se dañó una tubería');
   await c.click('form[data-submit=coConfirmar] button.primary'); await c.waitForTimeout(900);
   ok((await c.textContent('#toast')).includes('Turno terminado') && !c.popups, 'Cocina cierra de último y termina el turno (sin WhatsApp)');
+
+  // ---- El dueño ve lo que llegó más caro y la foto de la factura ----
+  await a.click('[data-a=go][data-v=reportes]'); await a.waitForTimeout(900); await a.click('[data-a=go][data-tab=resumen]'); await a.waitForTimeout(900);
+  ok((await texto(a)).includes('Queso mozzarella: $24.000 → $30.000 por kg (+25 %)'), 'Reportes → Cuentas: "Llegó más caro: Queso mozzarella $24.000 → $30.000 (+25 %)"');
 
   // ---- Reportes de la semana ----
   await a.click('[data-a=go][data-v=reportes]'); await a.click('[data-a=go][data-tab=semana]'); await a.waitForTimeout(800);

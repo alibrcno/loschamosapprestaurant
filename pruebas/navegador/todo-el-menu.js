@@ -192,6 +192,21 @@ function pngDePrueba() {
   await a.click('[data-a=go][data-v=reportes]'); await a.click('[data-a=go][data-tab=semana]'); await a.waitForTimeout(600);
   ok((await texto(a)).includes(`$${esperado.toLocaleString('es-CO')}`), 'Reportes → Semana muestra la venta del día');
 
+  // ---- El dueño reinicia el restaurante a 0 desde la app, con su clave ----
+  await a.evaluate(() => LC.go('ajustes', { tab: 'datos' })); await a.waitForTimeout(800);
+  await a.evaluate(() => LC.go('ajustes', { tab: 'datos' })); await a.waitForTimeout(300);
+  await a.click('[data-a=reinicioAbrir]');
+  await a.fill('.modal input[name=clave]', 'clave-equivocada'); await a.fill('.modal input[name=confirmacion]', 'REINICIAR');
+  await a.click('.modal button.danger');
+  ok((await toast(a)).includes('no es correcta'), 'Con la clave equivocada no reinicia');
+  await a.fill('.modal input[name=clave]', 'clave-de-reinicio-prueba'); await a.click('.modal button.danger');
+  await a.waitForTimeout(800);
+  const cero = await a.evaluate(async () => { const t = await LC.api('turno'); const c = await LC.api('catalogo'); return { turnos: t.turnos.length, saldos: Object.values(t.saldos), productos: c.productos.length, logo: !!c.negocio.logo }; });
+  ok((await a.textContent('#toast')).includes('quedó en 0') && cero.turnos === 0 && cero.saldos.every((x) => x === 0) && cero.productos > 0 && cero.logo,
+    'Reinicio desde Ajustes → Datos: todo en 0, y se conservan el menú y el logo');
+  const cm = await nuevo(); await entrar(cm, 'maria', '1234');
+  ok((await texto(cm)).includes('La caja está cerrada'), 'Después del reinicio el restaurante arranca como el primer día');
+
   const errs = [a, e, m, c].flatMap((p) => p.errs);
   ok(!errs.length, errs.length ? 'ERRORES: ' + errs.join(' | ') : 'Sin errores de JavaScript en ningún equipo');
   await b.close();

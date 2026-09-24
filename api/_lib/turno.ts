@@ -233,7 +233,7 @@ export async function leerEstado(db: PoolClient, u: Usuario) {
 
   const entradas = actual ? (await db.query(
     `SELECT e.id, e.creado_en AS fecha, e.shift_id AS "turnoId", i.tipo, e.item_id AS "itemId", i.nombre, i.unidad, e.cantidad,
-            e.costo_total AS costo, a.nombre AS cuenta, coalesce(e.nota, '') AS nota, coalesce(u.nombre, '') AS usuario
+            e.costo_total AS costo, a.nombre AS cuenta, coalesce(e.nota, '') AS nota, coalesce(u.nombre, '') AS usuario, e.foto_id AS "fotoId"
      FROM inventory_entries e JOIN inventory_items i ON i.id = e.item_id LEFT JOIN accounts a ON a.id = e.account_id
      LEFT JOIN users u ON u.id = e.user_id WHERE e.shift_id = $1 AND e.motivo IN ('llegada', 'almacen') ORDER BY e.creado_en`, [actual.id]
   )).rows.map((e) => ({ ...e, tipo: GRUPO[e.tipo], costo: dinero ? e.costo : 0, cuenta: dinero ? e.cuenta : null })) : [];
