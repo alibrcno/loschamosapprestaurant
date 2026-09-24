@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1E2B2F">
+  <meta name="robots" content="noindex">
+  <title>Instalar · Los Chamos POS</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>[hidden] { display: none !important; }</style>
+</head>
+<body class="is-login">
+  <!-- Se usa UNA vez: crea el primer administrador de un negocio en la base de datos.
+       Exige la clave de instalación (variable CLAVE_INSTALACION en Vercel). -->
+  <main class="main">
+    <div class="login">
+      <div class="login-brand"><div class="logo-mark">LC</div><h1>Instalación</h1><p>Crea el administrador del negocio en el servidor</p></div>
+      <div id="estado" class="notice">Revisando la conexión con la base de datos…</div>
+      <form id="form" class="card form" autocomplete="off" hidden>
+        <label>Código del negocio<input name="codigo" value="loschamos" required autocapitalize="none"></label>
+        <label>Clave de instalación<input type="password" name="claveInstalacion" required autocomplete="off"></label>
+        <label>Tu nombre<input name="nombre" required></label>
+        <label>Tu usuario<input name="usuario" required autocapitalize="none" pattern="[a-zA-Z0-9._\-]{3,30}" title="De 3 a 30 letras o números, sin espacios"></label>
+        <label>Tu contraseña (mínimo 8)<input type="password" name="clave" required minlength="8" autocomplete="new-password"></label>
+        <label>Repite la contraseña<input type="password" name="clave2" required minlength="8" autocomplete="new-password"></label>
+        <button class="btn primary lg block">Crear administrador</button>
+      </form>
+    </div>
+  </main>
+  <script>
+    'use strict';
+    const estado = document.getElementById('estado'), form = document.getElementById('form');
+    const aviso = (tipo, texto) => { estado.className = 'notice ' + tipo; estado.textContent = texto; };
+
+    fetch('/api/salud').then((r) => r.json()).then((d) => {
+      if (d.ok) { aviso('ok', 'Base de datos conectada.'); form.hidden = false; }
+      else aviso('bad', 'La API no llega a la base de datos. Revisa DATABASE_URL en Vercel.');
+    }).catch(() => aviso('bad', 'No se encontró la API. ¿Esta página está abierta desde Vercel?'));
+
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const d = Object.fromEntries(new FormData(form));
+      if (d.clave !== d.clave2) return aviso('bad', 'Las contraseñas no coinciden.');
+      delete d.clave2;
+      form.querySelector('button').disabled = true;
+      try {
+        const r = await fetch('/api/auth/instalar', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(d) });
+        const res = await r.json();
+        if (!r.ok) throw new Error(res.error || 'No se pudo crear');
+        const yo = await (await fetch('/api/auth/yo')).json();
+        form.hidden = true;
+        aviso('ok', `Listo: ${yo.usuario.nombre} es administrador de ${yo.negocio.nombre} (código ${yo.negocio.codigo}). Ya puedes cerrar esta página.`);
+      } catch (e) {
+        aviso('bad', e.message);
+        form.querySelector('button').disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

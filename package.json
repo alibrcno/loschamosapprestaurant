@@ -1,0 +1,22 @@
+{
+  "name": "loschamos-pos",
+  "private": true,
+  "description": "Los Chamos POS: app en public/, API serverless en api/ (Vercel) y base de datos Neon en db/",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "revisar": "tsc --noEmit",
+    "probar": "bash pruebas/correr.sh",
+    "navegador": "bash pruebas/navegador/correr.sh"
+  },
+  "dependencies": {
+    "bcryptjs": "3.0.2",
+    "pg": "8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.8",
+    "@types/pg": "8.15.5",
+    "typescript": "5.9.3"
+  }
+}

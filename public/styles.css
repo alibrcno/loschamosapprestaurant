@@ -116,7 +116,16 @@ legend { font-size: .88rem; font-weight: 600; color: var(--ink-2); margin-bottom
 .wiz-nav .btn.primary { flex: 1; }
 .inline-label { flex-direction: row; align-items: center; gap: 10px; margin-bottom: 12px; }
 .inline-label input { width: auto; }
-.filters { display: flex; gap: 8px; margin-bottom: 12px; }
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.tabla-scroll { overflow-x: auto; }
+.foto-factura { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.foto-mini { height: 56px; width: auto; border-radius: 6px; border: 1px solid var(--line); }
+.brand-logo { height: 28px; width: auto; vertical-align: middle; margin-right: 8px; border-radius: 4px; }
+.login-logo { max-width: 140px; max-height: 110px; margin: 0 auto 8px; display: block; }
+.logo-vista { max-width: 200px; max-height: 120px; display: block; margin: 8px 0; }
+.extras-linea { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chip.sm { padding: 2px 8px; min-height: 28px; font-size: .78rem; }
+.fila-llegada, .fila-material { border-bottom: 1px dashed var(--line, #ddd); padding-bottom: 6px; margin-bottom: 6px; }
 
 /* ---------- pasos del asistente ---------- */
 .stepper { list-style: none; display: flex; gap: 4px; margin-bottom: 14px; counter-reset: paso; overflow-x: auto; }

@@ -1,0 +1,13 @@
+# Secretos: nunca al repositorio
+.env
+.env.*
+
+# Dependencias y salidas de Vercel
+node_modules/
+.vercel/
+
+# Respaldos con datos reales del negocio
+loschamos-respaldo-*.json
+
+# Compilación local de pruebas
+.build/

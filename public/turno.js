@@ -1,6 +1,7 @@
 /* =====================================================================
-   Los Chamos POS v2 — Turno: apertura, caja, llegadas de mercancía,
-   gastos, inventario de cocina y cierre con reporte por WhatsApp
+   Los Chamos POS v2 — Turno: apertura (cocina primero, luego la caja), caja,
+   llegadas de mercancía, gastos, inventario de cocina y cierre.
+   Los reportes los envía el servidor al dueño por Telegram y correo.
    ===================================================================== */
 'use strict';
 (function () {
@@ -16,6 +17,8 @@
   const difClase = (n) => (n < 0 ? 'neg' : n > 0 ? 'pos' : '');
   const signo = (n) => (n > 0 ? '+' : '') + LC.q(n);
   const signoPesos = (n) => (n > 0 ? '+' : '') + LC.fmt(n);
+  // Al cerrar sesión se descarta el asistente: la siguiente persona no ve los conteos de la anterior
+  LC.wizReset = () => { W = null; };
   LC.A.wizAtras = () => { if (W && W.paso > 0) { W.paso--; LC.render(); } };
   LC.A.wizCancelar = (d) => { W = null; LC.go(d.v || 'inicio'); };
 
@@ -25,16 +28,25 @@
   LC.V.apertura = () => {
     if (!LC.can('turno.operar')) return LC.sinPermiso();
     if (LC.turno()) return `<div class="empty"><h2>La caja ya está abierta</h2><button class="btn" data-a="go" data-v="caja">Ir a caja</button></div>`;
-    if (!W || W.tipo !== 'apertura') W = { tipo: 'apertura', paso: 0, personal: [], bebidas: null, utensilios: null, saldos: null };
+    if (LC.esperandoCocina()) return esperandoCocinaHTML();
+    if (LC.catalogoVacio) return `<div class="empty"><h2>Primero sube el menú al servidor</h2>
+      <p>Los conteos de la caja usan las bebidas y utensilios del servidor. El administrador debe subir el menú una vez en Ajustes.</p>
+      ${LC.can('catalogo.editar') ? '<button class="btn primary" data-a="go" data-v="ajustes">Ir a Ajustes</button>' : ''}</div>`;
+    if (!W || W.tipo !== 'apertura') {
+      W = { tipo: 'apertura', paso: 0, personal: [], bebidas: null, utensilios: null, saldos: null };
+      // El personal viene del servidor; si no alcanzó a cargar al ingresar, se pide de nuevo
+      if (!LC.equipo.length) LC.cargarEquipo().then(() => { if (LC.state.view === 'apertura' && W && W.paso === 0 && LC.equipo.length) LC.render(); });
+    }
     const nav = (txt) => `<div class="wiz-nav">${W.paso > 0 ? '<button type="button" class="btn" data-a="wizAtras">Atrás</button>' : '<button type="button" class="btn ghost" data-a="wizCancelar">Cancelar</button>'}<button class="btn primary lg">${txt}</button></div>`;
     let body = '';
 
     if (W.paso === 0) {
-      const sel = (id) => (W.personal.find((p) => p.id === id) || {}).area || (id === LC.user.id && !W.personal.length ? 'Caja' : '');
+      const ya = (LC.turnoCocina() || {}).personal || []; // si cocina ya abrió, su gente ya está
+      const sel = (id) => (W.personal.find((p) => p.id === id) || ya.find((p) => p.id === id) || {}).area || (id === LC.user.id && !W.personal.length ? 'Caja' : '');
       body = `<form class="card form" data-submit="apPersonal">
         <h2>¿Quién trabaja hoy?</h2>
         <p class="muted">Queda registrado para contar los días trabajados de cada persona en el mes. Debe haber al menos una persona en cocina.</p>
-        ${LC.db.usuarios.filter((u) => u.activo).map((u) => `
+        ${LC.equipo.map((u) => `
           <label class="row-count"><span>${esc(u.nombre)}<small>${esc((LC.ROLES[u.rol] || {}).nombre || u.rol)}</small></span>
           <select name="p_${u.id}"><option value="">No trabaja hoy</option>${LC.AREAS.map((a) => `<option ${sel(u.id) === a ? 'selected' : ''}>${a}</option>`).join('')}</select></label>`).join('')}
         <p class="muted">¿Alguien sin usuario en la app?</p>
@@ -80,77 +92,47 @@
 
   LC.A.apPersonal = (d) => {
     const personal = [];
-    LC.db.usuarios.forEach((u) => { if (d['p_' + u.id]) personal.push({ id: u.id, nombre: u.nombre, area: d['p_' + u.id] }); });
+    LC.equipo.forEach((u) => { if (d['p_' + u.id]) personal.push({ id: u.id, nombre: u.nombre, area: d['p_' + u.id] }); });
     [1, 2].forEach((i) => { const n = (d['xn' + i] || '').trim(); if (n) personal.push({ id: null, nombre: n, area: d['xa' + i] }); });
     if (!personal.length) return LC.toast('Marca quién trabaja hoy', 'error');
-    if (!personal.some((p) => p.area === 'Cocina')) return LC.toast('Indica quién está en cocina hoy', 'error');
+    const ya = (LC.turnoCocina() || {}).personal || [];
+    if (!personal.some((p) => p.area === 'Cocina') && !ya.some((p) => p.area === 'Cocina')) return LC.toast('Indica quién está en cocina hoy', 'error');
     W.personal = personal; W.paso = 1; LC.render();
   };
   LC.A.apConteo = (d) => { W[d._tipo] = leerConteo(LC.db[d._tipo], d); W.paso++; LC.render(); };
   LC.A.apSaldos = (d) => { W.saldos = Object.fromEntries(LC.CUENTAS.map((c) => [c, Math.round(LC.num(d['s_' + c]))])); W.paso = 4; LC.render(); };
 
-  LC.A.apConfirmar = (d) => {
+  LC.A.apConfirmar = async (d, f) => {
     if (LC.turno()) return LC.toast('La caja ya está abierta', 'error');
-    const ahora = new Date().toISOString();
-    const difInv = {};
-    ['bebidas', 'utensilios'].forEach((tipo) => {
-      difInv[tipo] = {};
-      LC.db[tipo].forEach((it) => {
-        const dif = LC.num(W[tipo][it.id]) - LC.num(it.stock);
-        if (dif) difInv[tipo][it.id] = dif;
-      });
-    });
-    const t = {
-      id: LC.uid(), abiertoEn: ahora, abiertoPor: LC.user.nombre, estado: 'abierto', personal: W.personal,
-      seqOrden: 0, seqComanda: 0,
-      apertura: {
-        bebidas: W.bebidas, utensilios: W.utensilios,
-        insumos: Object.fromEntries(LC.db.insumos.map((i) => [i.id, LC.num(i.stock)])),
-        saldosContados: W.saldos, saldosSistema: Object.assign({}, LC.db.saldos), difInv, nota: (d.nota || '').trim()
-      },
-      cocina: { cierre: null }, cierre: null
-    };
-    LC.db.turnos.push(t);
-    LC.db.turnoActualId = t.id;
-    LC.CUENTAS.forEach((c) => {
-      const dif = W.saldos[c] - Math.round(LC.db.saldos[c] || 0);
-      if (dif) LC.mov({ tipo: 'ajuste', cuenta: c, monto: dif, concepto: 'Diferencia en arqueo de apertura', categoria: 'Arqueo' });
-    });
-    LC.db.bebidas.forEach((b) => (b.stock = LC.num(W.bebidas[b.id])));
-    LC.db.utensilios.forEach((u) => (u.stock = LC.num(W.utensilios[u.id])));
+    const btn = f.querySelector('button.primary');
+    btn.disabled = true;
+    let res;
+    try {
+      // El servidor registra el personal, los conteos, el arqueo (con sus ajustes en el libro) y el stock,
+      // y le envía el reporte de apertura al dueño por Telegram y correo
+      res = await LC.accionTurno('abrir', { personal: W.personal, bebidas: W.bebidas, utensilios: W.utensilios, saldos: W.saldos, nota: (d.nota || '').trim() });
+    } catch (e) {
+      btn.disabled = false;
+      return LC.toast(e.message, 'error');
+    }
     LC.log('Apertura de caja', `Personal: ${W.personal.map((p) => p.nombre).join(', ')}`);
     LC.save();
-    LC.whatsapp(msgApertura(t));
     W = null;
-    LC.toast('Caja abierta');
+    LC.toast('Caja abierta' + LC.textoAvisos(res.avisos));
     LC.go('inicio');
   };
-
-  function msgApertura(t) {
-    const a = t.apertura, L = [];
-    L.push(`*APERTURA DE CAJA, ${LC.db.config.negocio.toUpperCase()}*`);
-    L.push(`📅 ${LC.fechaLarga(t.abiertoEn)}, ${LC.hora(t.abiertoEn)}`, `👤 Abre: ${t.abiertoPor}`);
-    L.push(`👥 Personal: ${t.personal.map((p) => `${p.nombre} (${p.area})`).join(', ')}`, '');
-    L.push('*💵 Saldos al abrir*');
-    LC.CUENTAS.forEach((c) => {
-      const dif = a.saldosContados[c] - Math.round(a.saldosSistema[c] || 0);
-      L.push(`• ${c}: ${LC.fmt(a.saldosContados[c])}${dif ? ` ⚠️ dif. ${signoPesos(dif)}` : ''}`);
-    });
-    ['bebidas', 'utensilios'].forEach((tipo) => {
-      L.push('', `*${tipo === 'bebidas' ? '🥤 Bebidas' : '🍴 Utensilios'}*`);
-      LC.db[tipo].forEach((it) => {
-        const dif = a.difInv[tipo][it.id];
-        L.push(`• ${it.nombre}: ${LC.q(a[tipo][it.id])}${dif ? ` ⚠️ (${signo(dif)} vs sistema)` : ''}`);
-      });
-    });
-    if (a.nota) L.push('', `📝 ${a.nota}`);
-    return L.join('\n');
-  }
+  // "El reporte llegó al dueño por Telegram y correo" (o por qué no)
+  LC.textoAvisos = (a) => {
+    if (!a) return '';
+    const ok = ['telegram', 'correo'].filter((k) => a[k] === 'enviado').map((k) => (k === 'telegram' ? 'Telegram' : 'correo'));
+    return ok.length ? `. Reporte enviado por ${ok.join(' y ')}` : a.telegram === 'error' || a.correo === 'error' ? '. No se pudo enviar el reporte al dueño' : '';
+  };
 
   /* ================= CAJA DEL TURNO ================= */
   LC.V.caja = () => {
     if (!LC.guard('turno.operar', 'caja.movimientos', 'inventario.entradas')) return LC.sinPermiso();
     const t = LC.turno();
+    if (!t && LC.esperandoCocina()) return esperandoCocinaHTML();
     if (!t) return `<div class="empty big"><h2>La caja está cerrada</h2>
       <p>Al abrir se registra el personal del día, el conteo de bebidas y utensilios, y lo que hay en cada cuenta.</p>
       ${LC.can('turno.operar') ? '<button class="btn primary lg" data-a="go" data-v="apertura">Abrir caja</button>' : '<p class="muted">Espera a que la encargada abra la caja.</p>'}</div>`;
@@ -172,12 +154,20 @@
       ${LC.guard('inventario.entradas', 'cocina.inventario') ? '<button class="btn" data-a="entradaNueva">Llegó mercancía</button>' : ''}
     </div>
     ${LC.can('turno.operar') ? '<button class="btn dark lg block" data-a="go" data-v="cierre">Cerrar caja</button>' : ''}
+    ${LC.can('pos.cobrar') ? `<h3 class="sec">Impresora</h3>
+    <div class="card"><label class="check"><input type="checkbox" data-ch="estacionCambiar" ${LC.estacionActiva() ? 'checked' : ''}><span>Imprimir en este equipo las comandas, pre-cuentas y recibos</span></label>
+      <p class="muted">Actívalo solo en el PC de caja que tiene la impresora, y deja la app abierta ahí.</p>
+      <div class="actions-grid">
+        <button class="btn sm" data-a="impresionesVer">Ver impresiones y reimprimir</button>
+        <button class="btn sm" data-a="imprimirPrueba">Imprimir prueba</button>
+        <button class="btn sm primary" data-a="accesoCaja">Descargar acceso directo para el PC de caja</button>
+      </div></div>` : ''}
     <h3 class="sec">Personal de hoy</h3>
     <div class="chips static">${t.personal.map((p) => `<span class="chip">${esc(p.nombre)}, ${p.area}</span>`).join('')}</div>
     <h3 class="sec">Gastos, ingresos y traslados</h3>
     <div class="card">${movs.length ? movs.map((m) => `<div class="mov"><div><strong>${esc(m.concepto)}</strong><small>${LC.hora(m.fecha)}, ${esc(m.cuenta)}, ${esc(m.usuario)}</small></div><span class="num ${m.monto < 0 ? 'neg' : 'pos'}">${LC.fmt(m.monto)}</span></div>`).join('') : '<p class="muted">Sin movimientos todavía.</p>'}</div>
     <h3 class="sec">Mercancía recibida</h3>
-    <div class="card">${ents.length ? ents.map((e) => `<div class="mov"><div><strong>${esc(e.nombre)}: +${LC.q(e.cantidad)} ${esc(e.unidad)}</strong><small>${LC.hora(e.fecha)}, ${esc(e.usuario)}${e.nota ? ', ' + esc(e.nota) : ''}</small></div><span class="num">${e.costo ? LC.fmt(e.costo) : ''}</span></div>`).join('') : '<p class="muted">No ha llegado mercancía en este turno.</p>'}</div>`;
+    <div class="card">${ents.length ? ents.map((e) => `<div class="mov"><div><strong>${esc(e.nombre)}: +${LC.q(e.cantidad)} ${esc(e.unidad)}</strong><small>${LC.hora(e.fecha)}, ${esc(e.usuario)}${e.nota ? ', ' + esc(e.nota) : ''}${verFoto(e)}</small></div><span class="num">${e.costo ? LC.fmt(e.costo) : ''}</span></div>`).join('') : '<p class="muted">No ha llegado mercancía en este turno.</p>'}</div>`;
   };
 
   LC.A.movNuevo = (d) => {
@@ -194,13 +184,20 @@
         <button class="btn primary lg block">Guardar</button>
       </form>`);
   };
-  LC.A.movGuardar = (d) => {
+  // Envía una acción de caja al servidor desde un formulario del modal
+  async function enviar(f, accion, body, msg) {
+    const btn = f.querySelector('button.primary');
+    btn.disabled = true;
+    try { await LC.accionTurno(accion, body); }
+    catch (e) { btn.disabled = false; return LC.toast(e.message, 'error'); }
+    LC.cerrarModal(); LC.toast(msg); LC.render();
+  }
+
+  LC.A.movGuardar = (d, f) => {
     if (!LC.turno() && !LC.can('reportes.ver')) return LC.toast('La caja está cerrada', 'error');
     const monto = Math.round(LC.num(d.monto));
     if (monto <= 0) return LC.toast('Escribe un valor mayor a 0', 'error');
-    LC.mov({ tipo: d.tipo, cuenta: d.cuenta, monto: d.tipo === 'gasto' ? -monto : monto, concepto: d.concepto.trim(), categoria: d.categoria });
-    LC.log(d.tipo === 'gasto' ? 'Gasto registrado' : 'Ingreso registrado', `${d.concepto} ${LC.fmt(monto)} (${d.cuenta})`);
-    LC.save(); LC.cerrarModal(); LC.toast('Guardado'); LC.render();
+    return enviar(f, 'movimiento', { tipo: d.tipo, cuenta: d.cuenta, monto, concepto: d.concepto.trim(), categoria: d.categoria }, 'Guardado');
   };
 
   LC.A.trasladoNuevo = () => {
@@ -213,126 +210,188 @@
         <button class="btn primary lg block">Registrar traslado</button>
       </form>`);
   };
-  LC.A.trasladoGuardar = (d) => {
+  LC.A.trasladoGuardar = (d, f) => {
     const monto = Math.round(LC.num(d.monto));
     if (d.desde === d.hacia) return LC.toast('Elige dos cuentas diferentes', 'error');
     if (monto <= 0) return LC.toast('Escribe un valor mayor a 0', 'error');
-    const c = d.concepto.trim() || 'Traslado';
-    LC.mov({ tipo: 'traslado', cuenta: d.desde, monto: -monto, concepto: `${c} hacia ${d.hacia}`, categoria: 'Traslado' });
-    LC.mov({ tipo: 'traslado', cuenta: d.hacia, monto, concepto: `${c} desde ${d.desde}`, categoria: 'Traslado' });
-    LC.log('Traslado', `${LC.fmt(monto)} de ${d.desde} a ${d.hacia}`);
-    LC.save(); LC.cerrarModal(); LC.toast('Traslado registrado'); LC.render();
+    return enviar(f, 'traslado', { desde: d.desde, hacia: d.hacia, monto, concepto: d.concepto.trim() }, 'Traslado registrado');
   };
 
   /* ---------- llegada de mercancía (bebidas, utensilios, insumos) ---------- */
+  // Una factura puede traer varios artículos. Cocina registra solo insumos y no dice de qué cuenta se pagó.
+  const turnoParaLlegadas = () => { const t = LC.turnoCocina(); return t && !t.cajaCerrada ? t : null; };
+  const filaLlegada = (orden) => `<div class="fila-llegada grid3">
+      <label>Artículo<select name="item" required><option value="">Elige</option>
+        ${orden.map((tp) => `<optgroup label="${LC.INV[tp]}">${LC.db[tp].map((it) => `<option value="${tp}|${it.id}">${esc(it.nombre)} (${esc(it.unidad)})</option>`).join('')}</optgroup>`).join('')}
+      </select></label>
+      <label>Cantidad o peso<input type="number" name="cantidad" min="0.01" step="any" inputmode="decimal" required></label>
+      <label>Valor (opcional)<input type="number" name="costo" min="0" step="1" inputmode="numeric"></label></div>`;
+  let fotoFactura = null; // foto achicada de la factura que se está registrando
+  LC.A.facturaFoto = () => LC.elegirArchivo('image/*', async (d, inp) => {
+    const f = inp.files[0]; if (!f) return;
+    try { fotoFactura = await LC.achicarImagen(f, 1280, true); } catch (e) { return LC.toast(e.message, 'error'); }
+    const v = document.getElementById('foto-vista');
+    if (v) v.innerHTML = `<img src="${fotoFactura}" alt="Foto de la factura" class="foto-mini">`;
+  }, true);
+  LC.A.fotoVer = async (d) => {
+    let r;
+    try { r = await LC.api('fotos?id=' + encodeURIComponent(d.id)); } catch (e) { return LC.toast(e.message, 'error'); }
+    LC.modal(`${LC.modalHead('Foto de la factura')}<img src="${r.imagen}" alt="Factura" style="width:100%;height:auto"><p class="muted">Tomada ${LC.fechaHora(r.creadoEn)}. Se borra a los 15 días.</p>`, true);
+  };
+  const verFoto = (e) => (e.fotoId ? ` <button class="link" data-a="fotoVer" data-id="${e.fotoId}">📷 Ver factura</button>` : '');
   LC.A.entradaNueva = (d) => {
-    if (!LC.turno()) return LC.toast('Abre la caja antes de registrar mercancía', 'error');
+    if (!turnoParaLlegadas()) return LC.toast('Primero hay que abrir el turno (cocina o caja)', 'error');
+    fotoFactura = null;
     const tipos = [];
-    if (LC.can('inventario.entradas')) tipos.push('bebidas', 'utensilios');
-    if (LC.can('cocina.inventario')) tipos.push('insumos');
+    if (LC.can('inventario.entradas')) tipos.push('bebidas', 'utensilios', 'insumos');
+    else if (LC.can('cocina.inventario')) tipos.push('insumos');
     const orden = d.solo ? [d.solo].filter((x) => tipos.includes(x)) : tipos;
+    const caja = LC.can('caja.movimientos');
     LC.modal(`${LC.modalHead('Llegó mercancía')}
       <form class="form" data-submit="entradaGuardar">
-        <label>¿Qué llegó?<select name="item" required><option value="">Elige un producto</option>
-          ${orden.map((tp) => `<optgroup label="${LC.INV[tp]}">${LC.db[tp].map((it) => `<option value="${tp}|${it.id}">${esc(it.nombre)} (${esc(it.unidad)})</option>`).join('')}</optgroup>`).join('')}
-        </select></label>
-        <label>Cantidad o peso recibido<input type="number" name="cantidad" min="0.01" step="any" inputmode="decimal" required></label>
-        <label>Valor total pagado (opcional)<input type="number" name="costo" min="0" step="1" inputmode="numeric"></label>
-        <label>Se pagó desde<select name="cuenta"><option value="">No se pagó de la caja (crédito o lo pagó el dueño)</option>${LC.CUENTAS.map((c) => `<option>${c}</option>`).join('')}</select></label>
-        <label>Proveedor o nota<input name="nota" placeholder="Ej. Postobón, factura 1234"></label>
+        <p class="muted">Agrega todos los artículos de la misma factura.</p>
+        <div id="filas-llegada">${filaLlegada(orden)}</div>
+        <button type="button" class="btn sm" data-a="entradaFila">+ Otro artículo</button>
+        ${caja ? `<label>Se pagó desde<select name="cuenta"><option value="">No se pagó de la caja (crédito o lo pagó el dueño)</option>${LC.CUENTAS.map((c) => `<option>${c}</option>`).join('')}</select></label>` : ''}
+        <label>Proveedor o factura<input name="nota" placeholder="Ej. Postobón, factura 1234"></label>
+        <div class="foto-factura"><button type="button" class="btn" data-a="facturaFoto">📷 Foto de la factura (opcional)</button><span id="foto-vista"></span></div>
+        <p class="muted">La foto se guarda 15 días. Si algo llegó más caro que la última vez, al dueño le llega un aviso.</p>
         <button class="btn primary lg block">Registrar llegada</button>
-      </form>`);
+      </form>`, true);
   };
-  LC.A.entradaGuardar = (d) => {
-    const t = LC.turno(); if (!t) return;
-    const [tipo, id] = d.item.split('|');
-    const it = (LC.db[tipo] || []).find((x) => x.id === id);
-    if (!it) return LC.toast('Elige un producto', 'error');
-    const cant = LC.num(d.cantidad), costo = Math.round(LC.num(d.costo));
-    if (cant <= 0) return LC.toast('La cantidad debe ser mayor a 0', 'error');
-    if (d.cuenta && !costo) return LC.toast('Si se pagó desde una cuenta, escribe el valor pagado', 'error');
-    it.stock = LC.num(it.stock) + cant;
-    if (costo > 0) it.costo = Math.round((costo / cant) * 100) / 100;
-    const e = {
-      id: LC.uid(), fecha: new Date().toISOString(), turnoId: t.id, tipo, itemId: id, nombre: it.nombre, unidad: it.unidad,
-      cantidad: cant, costo, cuenta: d.cuenta || null, nota: d.nota.trim(), usuario: LC.user.nombre
-    };
-    LC.db.entradas.push(e);
-    if (costo > 0 && d.cuenta) LC.mov({ tipo: 'gasto', cuenta: d.cuenta, monto: -costo, concepto: `Compra ${it.nombre} x${LC.q(cant)}`, categoria: 'Compra de inventario', ref: e.id });
-    LC.log('Llegada de mercancía', `${it.nombre} +${LC.q(cant)} ${it.unidad}${costo ? ' por ' + LC.fmt(costo) : ''}`);
-    LC.save(); LC.cerrarModal(); LC.toast(`${it.nombre}: +${LC.q(cant)} registrado`); LC.render();
+  LC.A.entradaFila = () => {
+    const cont = document.getElementById('filas-llegada');
+    const nueva = cont.firstElementChild.cloneNode(true);
+    nueva.querySelectorAll('input, select').forEach((x) => (x.value = ''));
+    cont.appendChild(nueva);
+  };
+  LC.A.entradaGuardar = async (d, f) => {
+    if (!turnoParaLlegadas()) return;
+    const items = [];
+    for (const fila of f.querySelectorAll('.fila-llegada')) {
+      const sel = fila.querySelector('[name=item]').value;
+      if (!sel) continue;
+      const cant = LC.num(fila.querySelector('[name=cantidad]').value), costo = Math.round(LC.num(fila.querySelector('[name=costo]').value));
+      if (cant <= 0) return LC.toast('Cada artículo necesita su cantidad', 'error');
+      if (d.cuenta && !costo) return LC.toast('Si se pagó desde una cuenta, escribe el valor de cada artículo', 'error');
+      items.push({ itemId: sel.split('|')[1], cantidad: cant, costo });
+    }
+    if (!items.length) return LC.toast('Elige al menos un artículo', 'error');
+    const btn = f.querySelector('button.primary'); btn.disabled = true;
+    let r;
+    try { r = await LC.accionTurno('llegada', { items, cuenta: d.cuenta || null, nota: (d.nota || '').trim(), foto: fotoFactura }); }
+    catch (e) { btn.disabled = false; return LC.toast(e.message, 'error'); }
+    fotoFactura = null;
+    LC.cerrarModal(); LC.render();
+    const msg = items.length === 1 ? 'Llegada registrada' : `${items.length} artículos registrados`;
+    // Si algo llegó más caro, se dice aquí también (al dueño le llega el aviso por Telegram y correo)
+    LC.toast(r.aumentos && r.aumentos.length ? `${msg}. ⚠️ Llegó más caro: ${r.aumentos.map((a) => `${a.nombre} (+${LC.q(a.pct)} %)`).join(', ')}` : msg, r.aumentos && r.aumentos.length ? 'error' : 'ok');
+  };
+  LC.A.cocinaAbrir = async (d, el) => {
+    el.disabled = true;
+    try { await LC.accionTurno('abrir-cocina', {}); } catch (e) { el.disabled = false; return LC.toast(e.message, 'error'); }
+    LC.toast('Cocina abierta. Ya puedes registrar lo que llegue.');
+    LC.go('cocina', { tab: 'inventario' });
   };
 
   /* ================= INVENTARIO DE COCINA ================= */
   LC.cocinaInvHTML = () => {
-    const t = LC.turno();
-    if (!t) return '<div class="empty"><h2>La caja está cerrada</h2><p>El inventario de cocina se maneja dentro del turno.</p></div>';
+    const t = LC.turnoCocina();
+    if (!t) return `<div class="empty"><h2>El turno no ha empezado</h2><p>Cocina puede abrir el turno desde las 2 p. m. para registrar lo que llegue. La caja la abre la encargada cuando llegue.</p>
+      ${LC.can('cocina.inventario') ? '<button class="btn primary lg" data-a="cocinaAbrir">Abrir cocina</button>' : ''}</div>`;
     const ent = LC.entradasTurno(t.id, 'insumos');
     const lista = LC.db.entradas.filter((e) => e.turnoId === t.id && e.tipo === 'insumos').slice().reverse();
     const cierre = t.cocina.cierre;
     return `
+    ${t.cajaCerrada ? '<div class="notice"><strong>La encargada ya cerró la caja.</strong> Falta tu inventario de cierre de cocina: con él se calcula el resultado del día.</div>' : ''}
+    ${t.cajaAbierta === false ? '<div class="notice">Cocina abierta. La encargada todavía no abre la caja: las comandas llegan cuando la abra.</div>' : ''}
     <div class="actions-grid">
-      <button class="btn primary" data-a="entradaNueva" data-solo="insumos">Registrar llegada de insumos</button>
+      ${t.cajaCerrada ? '' : '<button class="btn primary" data-a="entradaNueva" data-solo="insumos">Registrar llegada de insumos</button>'}
       ${cierre ? '<button class="btn" data-a="go" data-v="cocinaCierre">Volver a contar</button>' : '<button class="btn dark" data-a="go" data-v="cocinaCierre">Inventario de cierre de cocina</button>'}
     </div>
     ${cierre ? `<div class="notice ok">Inventario de cierre hecho a las ${LC.hora(cierre.en)} por ${esc(cierre.por)}.</div>` : ''}
     <h3 class="sec">Insumos en este turno</h3>
+    <p class="muted">"Al abrir" es lo que contó cocina en el cierre del turno anterior.</p>
     <table class="tbl"><thead><tr><th>Insumo</th><th>Al abrir</th><th>Llegó</th><th>Debería haber</th></tr></thead><tbody>
     ${LC.db.insumos.map((i) => { const ini = LC.num(t.apertura.insumos[i.id]), e = LC.num(ent[i.id]); return `<tr><td>${esc(i.nombre)} <small>${esc(i.unidad)}</small></td><td>${LC.q(ini)}</td><td>${e ? '+' + LC.q(e) : ''}</td><td><strong>${LC.q(ini + e)}</strong></td></tr>`; }).join('')}
     </tbody></table>
     <h3 class="sec">Llegadas registradas</h3>
-    <div class="card">${lista.length ? lista.map((e) => `<div class="mov"><div><strong>${esc(e.nombre)}: +${LC.q(e.cantidad)} ${esc(e.unidad)}</strong><small>${LC.hora(e.fecha)}, ${esc(e.usuario)}${e.nota ? ', ' + esc(e.nota) : ''}</small></div></div>`).join('') : '<p class="muted">Todavía no llega nada en este turno.</p>'}</div>`;
+    <div class="card">${lista.length ? lista.map((e) => `<div class="mov"><div><strong>${esc(e.nombre)}: +${LC.q(e.cantidad)} ${esc(e.unidad)}</strong><small>${LC.hora(e.fecha)}, ${esc(e.usuario)}${e.nota ? ', ' + esc(e.nota) : ''}${verFoto(e)}</small></div></div>`).join('') : '<p class="muted">Todavía no llega nada en este turno.</p>'}</div>`;
   };
 
   LC.V.cocinaCierre = () => {
     if (!LC.can('cocina.inventario')) return LC.sinPermiso();
-    const t = LC.turno();
+    const t = LC.turnoCocina();
     if (!t) return '<div class="empty"><h2>La caja está cerrada</h2></div>';
-    if (!W || W.tipo !== 'cocina') W = { tipo: 'cocina', paso: 0, conteo: null };
+    if (!W || W.tipo !== 'cocina') W = { tipo: 'cocina', paso: 0, conteo: null, preparar: [] };
+    const preps = LC.db.config.preparaciones || [];
     if (W.paso === 0) {
       return `<div class="page-head"><h1>Inventario de cierre de cocina</h1></div>${stepper(['Contar', 'Revisar'], 0)}
       <form class="card form" data-submit="coConteo">
         <p class="muted">Pesa o cuenta todo lo que queda. Con esto se calcula cuánto material se gastó y qué hay que comprar para mañana.</p>
         ${LC.db.insumos.map((i) => campoConteo(i, W.conteo ? W.conteo[i.id] : null)).join('')}
+        ${preps.length ? `<fieldset><legend>¿Qué hay que preparar mañana?</legend>
+          <p class="muted">Sus materiales se agregan solos a la lista de compras.</p>
+          <div class="checks">${preps.map((p) => `<label class="check"><input type="checkbox" name="prep" value="${esc(p.nombre)}" ${W.preparar.includes(p.nombre) ? 'checked' : ''}><span>${esc(p.nombre)}</span></label>`).join('')}</div></fieldset>` : ''}
         <div class="wiz-nav"><button type="button" class="btn ghost" data-a="wizCancelar" data-v="cocina">Cancelar</button><button class="btn primary lg">Revisar</button></div>
       </form>`;
     }
-    const tmp = Object.assign({}, t, { cocina: { cierre: { conteo: W.conteo } } });
+    const tmp = Object.assign({}, t, { cocina: { cierre: { conteo: W.conteo, preparar: W.preparar } } });
     const r = LC.resumenTurno(tmp);
+    const plata = LC.can('reportes.ver'); // el costo de lo gastado solo lo ve el dueño (sale en Reportes)
     return `<div class="page-head"><h1>Inventario de cierre de cocina</h1></div>${stepper(['Contar', 'Revisar'], 1)}
     <form class="card form" data-submit="coConfirmar">
-      <table class="tbl"><thead><tr><th>Insumo</th><th>Abrió</th><th>Llegó</th><th>Queda</th><th>Gastado</th><th>Costo</th></tr></thead><tbody>
-      ${r.insumos.map((x) => `<tr><td>${esc(x.nombre)} <small>${esc(x.unidad)}</small></td><td>${LC.q(x.ini)}</td><td>${x.ent ? '+' + LC.q(x.ent) : ''}</td><td>${LC.q(x.fin)}</td><td class="${x.consumo < 0 ? 'neg' : ''}">${LC.q(x.consumo)}</td><td>${LC.fmt(x.costo)}</td></tr>`).join('')}
-      </tbody><tfoot><tr><td colspan="5">Costo de insumos consumidos</td><td><strong>${LC.fmt(r.costoInsumos)}</strong></td></tr></tfoot></table>
+      <table class="tbl"><thead><tr><th>Insumo</th><th>Abrió</th><th>Llegó</th><th>Queda</th><th>Gastado</th>${plata ? '<th>Costo</th>' : ''}</tr></thead><tbody>
+      ${r.insumos.map((x) => `<tr><td>${esc(x.nombre)} <small>${esc(x.unidad)}</small></td><td>${LC.q(x.ini)}</td><td>${x.ent ? '+' + LC.q(x.ent) : ''}</td><td>${LC.q(x.fin)}</td><td class="${x.consumo < 0 ? 'neg' : ''}">${LC.q(x.consumo)}</td>${plata ? `<td>${LC.fmt(x.costo)}</td>` : ''}</tr>`).join('')}
+      </tbody>${plata ? `<tfoot><tr><td colspan="5">Costo de insumos consumidos</td><td><strong>${LC.fmt(r.costoInsumos)}</strong></td></tr></tfoot>` : ''}</table>
       ${r.insumos.some((x) => x.consumo < 0) ? '<div class="notice bad">Hay insumos con consumo negativo: queda más de lo que debería. Revisa si faltó registrar una llegada o si el conteo está mal.</div>' : ''}
+      ${W.preparar.length ? `<p><strong>Preparar mañana:</strong> ${W.preparar.map(esc).join(', ')}</p>` : ''}
       <h3 class="sec">Compras sugeridas para mañana</h3>
-      ${listaCompras(r.insumos) || '<p class="muted">Todo está sobre el stock sugerido.</p>'}
-      <label>Observaciones<textarea name="obs" rows="2" placeholder="Ej. el queso llegó en mal estado"></textarea></label>
-      <div class="wiz-nav"><button type="button" class="btn" data-a="wizAtras">Corregir conteo</button><button class="btn primary lg">Guardar y enviar por WhatsApp</button></div>
+      ${listaCompras(r.insumos.concat(r.bebidas.filter((x) => x.preparacion), r.utensilios.filter((x) => x.preparacion))) || '<p class="muted">Todo está sobre el stock sugerido.</p>'}
+      <label>Observaciones del turno de cocina<textarea name="obs" rows="3" placeholder="Ej. se dañó una tubería, el queso llegó en mal estado"></textarea></label>
+      <div class="wiz-nav"><button type="button" class="btn" data-a="wizAtras">Corregir conteo</button><button class="btn primary lg">Guardar inventario de cierre</button></div>
     </form>`;
   };
   const listaCompras = (rows) => {
     const f = rows.filter((x) => x.comprar > 0);
     return f.length ? `<ul class="compras">${f.map((x) => `<li><strong>${LC.q(x.comprar)} ${esc(x.unidad)}</strong> ${esc(x.nombre)}</li>`).join('')}</ul>` : '';
   };
-  LC.A.coConteo = (d) => { W.conteo = leerConteo(LC.db.insumos, d); W.paso = 1; LC.render(); };
-  LC.A.coConfirmar = (d) => {
-    const t = LC.turno(); if (!t) return;
-    t.cocina.cierre = { en: new Date().toISOString(), por: LC.user.nombre, conteo: W.conteo, obs: (d.obs || '').trim() };
-    LC.db.insumos.forEach((i) => (i.stock = LC.num(W.conteo[i.id])));
-    const r = LC.resumenTurno(t);
-    LC.log('Inventario de cierre de cocina', `Costo consumido ${LC.fmt(r.costoInsumos)}`);
+  LC.A.coConteo = (d, f) => {
+    W.conteo = leerConteo(LC.db.insumos, d);
+    W.preparar = Array.from(f.querySelectorAll('input[name=prep]:checked')).map((x) => x.value);
+    W.paso = 1; LC.render();
+  };
+  LC.A.coConfirmar = async (d, f) => {
+    const t = LC.turnoCocina(); if (!t) return;
+    const btn = f.querySelector('button.primary');
+    btn.disabled = true;
+    let res;
+    try { res = await LC.accionTurno('cerrar-cocina', { conteo: W.conteo, obs: (d.obs || '').trim(), preparar: W.preparar }); }
+    catch (e) { btn.disabled = false; return LC.toast(e.message, 'error'); }
+    // Si con esto terminó el turno, el servidor le envía al dueño el reporte completo (Telegram y correo)
+    LC.log('Inventario de cierre de cocina');
     LC.save();
-    const L = [`*INVENTARIO DE COCINA, ${LC.db.config.negocio.toUpperCase()}*`, `📅 ${LC.fechaLarga(t.abiertoEn)}`, `👨‍🍳 ${LC.user.nombre}`, '', '*📦 Consumo del turno*'];
-    r.insumos.forEach((x) => L.push(`• ${x.nombre}: gastó ${LC.q(x.consumo)} ${x.unidad}, quedan ${LC.q(x.fin)}${x.consumo < 0 ? ' ⚠️' : ''}`));
-    L.push('', `*Costo consumido: ${LC.fmt(r.costoInsumos)}*`, '', '*🛒 Comprar para mañana*');
-    const c = r.insumos.filter((x) => x.comprar > 0);
-    if (c.length) c.forEach((x) => L.push(`• ${LC.q(x.comprar)} ${x.unidad} de ${x.nombre}`)); else L.push('✅ Stock completo');
-    if (t.cocina.cierre.obs) L.push('', `📝 ${t.cocina.cierre.obs}`);
-    LC.whatsapp(L.join('\n'));
     W = null;
-    LC.toast('Inventario de cocina guardado');
-    LC.go('cocina', { tab: 'inventario' });
+    LC.toast(res.termino ? 'Inventario guardado. Turno terminado' + (LC.textoAvisos(res.avisos) || ': el resultado quedó en Reportes') : 'Inventario de cocina guardado. El reporte final sale cuando la encargada cierre la caja.');
+    LC.go(res.termino ? 'inicio' : 'cocina', { tab: 'inventario' });
+  };
+
+  /* Turno esperando a cocina: aviso y opción de terminarlo sin inventario de cocina */
+  function esperandoCocinaHTML() {
+    const t = LC.turnoCocina();
+    return `<div class="empty big"><h2>La caja ya se cerró</h2>
+      <p>Falta el <strong>inventario de cierre de cocina</strong> del turno de ${LC.fecha(t.abiertoEn)}. Con ese último paso se calcula el resultado del día y se puede abrir el siguiente turno.</p>
+      ${LC.can('cocina.inventario') ? '<button class="btn primary lg" data-a="go" data-v="cocinaCierre">Hacer inventario de cocina</button>' : ''}
+      ${LC.can('turno.operar') ? '<button class="btn ghost" data-a="terminarSinCocina">Cocina no lo hizo: terminar el turno sin inventario de cocina</button>' : ''}</div>`;
+  }
+  LC.A.terminarSinCocina = async (d, el) => {
+    const motivo = (prompt('¿Por qué se termina el turno sin inventario de cocina? Queda registrado.') || '').trim();
+    if (!motivo) return;
+    el.disabled = true;
+    try { await LC.accionTurno('terminar-sin-cocina', { motivo }); }
+    catch (e) { el.disabled = false; return LC.toast(e.message, 'error'); }
+    LC.toast('Turno terminado sin inventario de cocina');
+    LC.go('inicio');
   };
 
   /* ================= CIERRE DE CAJA ================= */
@@ -341,8 +400,9 @@
   LC.V.cierre = () => {
     if (!LC.can('turno.operar')) return LC.sinPermiso();
     const t = LC.turno();
+    if (!t && LC.esperandoCocina()) return esperandoCocinaHTML();
     if (!t) return '<div class="empty"><h2>No hay caja abierta</h2></div>';
-    const abiertas = LC.db.ordenes.filter((o) => o.turnoId === t.id && o.estado === 'abierta' && o.lineas.length);
+    const abiertas = LC.db.ordenes.filter((o) => o.turnoId === t.id && o.estado === 'abierta' && !o.local);
     if (abiertas.length) {
       return `<div class="page-head"><h1>Cerrar caja</h1></div>
       <div class="card"><h2>Hay cuentas sin cerrar</h2><p class="muted">Cobra o anula estas cuentas antes de cerrar la caja.</p>
@@ -385,11 +445,13 @@
         <h3 class="sec">Bebidas</h3>
         <table class="tbl"><thead><tr><th>Bebida</th><th>Abrió</th><th>Llegó</th><th>Queda</th><th>Vendidas</th><th>En POS</th><th>Valor</th></tr></thead><tbody>
         ${r.bebidas.map((b) => `<tr><td>${esc(b.nombre)}</td><td>${LC.q(b.ini)}</td><td>${b.ent ? '+' + LC.q(b.ent) : ''}</td><td>${LC.q(b.fin)}</td><td>${LC.q(b.consumo)}</td><td class="${b.dif ? 'neg' : ''}">${LC.q(b.pos)}</td><td>${LC.fmt(b.valor)}</td></tr>`).join('')}
-        </tbody><tfoot><tr><td colspan="6">Venta de bebidas según conteo</td><td><strong>${LC.fmt(r.ventaBebidasConteo)}</strong></td></tr></tfoot></table>
+        </tbody><tfoot><tr><td colspan="6">Venta de bebidas según conteo (${LC.q(r.bebidasVendidas)} und)</td><td><strong>${LC.fmt(r.ventaBebidasConteo)}</strong></td></tr></tfoot></table>
+        ${r.apartarBebidas ? `<div class="notice">Aparta <strong>${LC.fmt(r.apartarBebidas)}</strong> para reponer las bebidas que se vendieron (lo que costaron).</div>` : ''}
         ${hayDifB ? '<div class="notice bad">Hay bebidas que salieron del inventario y no se registraron en el POS (o al revés). Revisa antes de cerrar.</div>' : ''}
         ${r.cocinaCerrada ? '' : '<div class="notice">Cocina aún no hace su inventario de cierre. El costo de insumos no entra en la utilidad de hoy.</div>'}
         <h3 class="sec">Compras sugeridas para mañana</h3>
-        ${listaCompras(r.bebidas.concat(r.utensilios, r.cocinaCerrada ? r.insumos : [])) || '<p class="muted">Todo está sobre el stock sugerido.</p>'}
+        ${listaCompras(r.bebidas.concat(r.utensilios)) || '<p class="muted">Bebidas y utensilios están sobre el stock sugerido.</p>'}
+        <p class="muted">Lo de cocina (insumos) sale en el reporte final, cuando cocina haga su inventario.</p>
         <label>${hayDesc || hayDifB ? 'Explica las diferencias' : 'Observaciones (opcional)'}<textarea name="obs" rows="3" ${hayDesc || hayDifB ? 'required' : ''}></textarea></label>
         ${nav('Cerrar caja y enviar reporte')}</form>`;
     }
@@ -398,25 +460,22 @@
   LC.A.ciConteo = (d) => { W[d._tipo] = leerConteo(LC.db[d._tipo], d); W.paso++; LC.render(); };
   LC.A.ciSaldos = (d) => { W.saldos = Object.fromEntries(LC.CUENTAS.map((c) => [c, Math.round(LC.num(d['s_' + c]))])); W.paso = 3; LC.render(); };
 
-  LC.A.ciConfirmar = (d) => {
+  LC.A.ciConfirmar = async (d, f) => {
     const t = LC.turno(); if (!t || !W) return;
-    const ahora = new Date().toISOString();
-    const esperado = Object.fromEntries(LC.CUENTAS.map((c) => [c, Math.round(LC.db.saldos[c] || 0)]));
-    const descuadre = Object.fromEntries(LC.CUENTAS.map((c) => [c, W.saldos[c] - esperado[c]]));
-    t.cierre = { en: ahora, por: LC.user.nombre, bebidas: W.bebidas, utensilios: W.utensilios, saldosContados: W.saldos, saldosEsperados: esperado, descuadre, obs: (d.obs || '').trim() };
-    LC.CUENTAS.forEach((c) => { if (descuadre[c]) LC.mov({ tipo: 'ajuste', cuenta: c, monto: descuadre[c], concepto: 'Descuadre en cierre de caja', categoria: 'Arqueo' }); });
-    LC.db.bebidas.forEach((b) => (b.stock = LC.num(W.bebidas[b.id])));
-    LC.db.utensilios.forEach((u) => (u.stock = LC.num(W.utensilios[u.id])));
-    t.cerradoEn = ahora;
-    t.estado = 'cerrado';
-    t.resumen = LC.resumenTurno(t); // foto fija: si cambian precios después, el histórico no cambia
-    LC.db.turnoActualId = null;
-    const totalDesc = Object.values(descuadre).reduce((a, b) => a + b, 0);
-    LC.log('Cierre de caja', `Ventas ${LC.fmt(t.resumen.ventas)}, descuadre ${LC.fmt(totalDesc)}`);
+    const r = LC.resumenTurno(Object.assign({}, t, { cierre: { bebidas: W.bebidas, utensilios: W.utensilios } }));
+    const btn = f.querySelector('button.primary');
+    btn.disabled = true;
+    let res;
+    try {
+      res = await LC.accionTurno('cerrar-caja', { bebidas: W.bebidas, utensilios: W.utensilios, saldos: W.saldos, obs: (d.obs || '').trim() });
+    } catch (e) {
+      btn.disabled = false;
+      return LC.toast(e.message, 'error');
+    }
+    LC.log('Cierre de caja', `Ventas ${LC.fmt(r.ventas)}`);
     LC.save();
-    LC.whatsapp(LC.msgCierre(t));
     W = null;
-    LC.toast('Caja cerrada');
+    LC.toast((res.termino ? 'Caja cerrada. Turno terminado' : 'Caja cerrada. Falta el inventario de cocina') + LC.textoAvisos(res.avisos));
     LC.go('inicio');
   };
 
@@ -426,7 +485,7 @@
     const L = [];
     L.push(`*CIERRE DE CAJA, ${LC.db.config.negocio.toUpperCase()}*`);
     L.push(`📅 ${LC.fechaLarga(t.abiertoEn)}, ${LC.hora(t.abiertoEn)} a ${LC.hora(t.cerradoEn || new Date().toISOString())}`);
-    L.push(`👤 Abrió ${t.abiertoPor}, cerró ${ci.por || ''}`);
+    L.push(`👤 Abrió ${t.abiertoPor}, cerró la caja ${ci.por || ''}`);
     L.push('', `*💰 VENTAS: ${LC.fmt(r.ventas)}*`, `${r.ordenesPagadas} cuentas, ticket promedio ${LC.fmt(r.ticketProm)}`);
     LC.CUENTAS.forEach((c) => L.push(`• ${c}: ${LC.fmt(r.ventasCuenta[c] || 0)}`));
     const cats = Object.entries(r.porCategoria).sort((a, b) => b[1] - a[1]);
@@ -442,9 +501,15 @@
         L.push(`• ${c}: ${LC.fmt(ci.saldosContados[c])} ${dif ? `⚠️ ${dif > 0 ? 'sobran' : 'faltan'} ${LC.fmt(Math.abs(dif))}` : '✅'}`);
       });
     }
+    const sinCocina = t.cocina && t.cocina.cierre && t.cocina.cierre.sinInventario;
     L.push('', '*📊 RESULTADO DEL DÍA*');
-    L.push(`Costo de lo consumido: ${LC.fmt(r.costoConsumo)}${r.cocinaCerrada ? '' : ' (sin inventario de cocina)'}`);
-    L.push(`Gastos operativos: ${LC.fmt(r.gastosOp)}`, `*Utilidad estimada: ${LC.fmt(r.utilidad)}*`);
+    if (!r.cocinaCerrada && t.estado !== 'cerrado') {
+      L.push('⏳ Se calcula cuando cocina haga su inventario de cierre (último paso de la noche).');
+    } else {
+      L.push(`Costo de lo consumido: ${LC.fmt(r.costoConsumo)}${r.cocinaCerrada ? '' : ' (sin inventario de cocina)'}`);
+      L.push(`Gastos operativos: ${LC.fmt(r.gastosOp)}`, `*Utilidad estimada: ${LC.fmt(r.utilidad)}*`);
+      if (sinCocina) L.push(`⚠️ Terminado sin inventario de cocina: ${t.cocina.cierre.motivo}`);
+    }
     if (r.anulaciones) L.push(`⚠️ Anulaciones en el turno: ${r.anulaciones}`);
     const comp = r.bebidas.concat(r.utensilios, r.cocinaCerrada ? r.insumos : []).filter((x) => x.comprar > 0);
     L.push('', '*🛒 COMPRAR PARA MAÑANA*');
